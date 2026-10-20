@@ -40,8 +40,10 @@ export async function POST(req: Request) {
       updatedAt: new Date().toISOString(),
     };
 
-    LedgerEngine.saveRequest(procurementRequest);
-    LedgerEngine.logAudit({
+    // Authoritative asynchronous persistence to Supabase & Ledger
+    await LedgerEngine.saveRequestAsync(procurementRequest);
+
+    await LedgerEngine.logAuditAsync({
       businessId: DEMO_BUSINESS.id,
       entityType: 'request',
       entityId: requestId,

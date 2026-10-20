@@ -11,7 +11,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'orderId is required.' }, { status: 400 });
     }
 
-    const paymentAttempt = LedgerEngine.getPaymentByOrderId(orderId);
+    // Authoritative lookup from database/ledger
+    const paymentAttempt = await LedgerEngine.getPaymentByOrderIdAsync(orderId);
     if (!paymentAttempt) {
       return NextResponse.json(
         { error: `Payment attempt not found for orderId "${orderId}".` },
@@ -19,12 +20,38 @@ export async function POST(req: Request) {
       );
     }
 
+    // Idempotency check: If already successfully captured, return completed state without recharging
+    if (paymentAttempt.status === 'captured') {
+      return NextResponse.json({
+        success: true,
+        captureId: paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
+        status: 'COMPLETED',
+        paymentAttempt,
+        isSimulated: Boolean(paymentAttempt.providerResponse?.is_simulated),
+      });
+    }
+
     const result = await capturePayPalOrder({
       orderId,
       paymentAttempt,
     });
 
-    LedgerEngine.savePaymentAttempt(result.paymentAttempt);
+    // Authoritatively persist updated payment attempt
+    await LedgerEngine.savePaymentAttemptAsync(result.paymentAttempt);
+
+    // If capture failed, return explicit payment failure status - NEVER simulate or claim success!
+    if (result.status === 'FAILED') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.errorMessage || result.paymentAttempt.errorMessage || 'PayPal capture failed or rejected by provider.',
+          status: 'FAILED',
+          paymentAttempt: result.paymentAttempt,
+          isSimulated: result.isSimulated,
+        },
+        { status: 402 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
@@ -36,6 +63,6 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     console.error('Error in /api/paypal/capture-order:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

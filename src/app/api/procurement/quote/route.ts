@@ -19,7 +19,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const procurementRequest = LedgerEngine.getRequest(requestId);
+    // Authoritative lookup from database/ledger
+    const procurementRequest = await LedgerEngine.getRequestAsync(requestId);
     if (!procurementRequest) {
       return NextResponse.json({ error: `Request "${requestId}" not found.` }, { status: 404 });
     }
@@ -37,8 +38,10 @@ export async function POST(req: Request) {
       requesterId: procurementRequest.requesterId,
     });
 
-    LedgerEngine.saveQuote(quote);
-    LedgerEngine.logAudit({
+    // Authoritative asynchronous persistence to Supabase & Ledger
+    await LedgerEngine.saveQuoteAsync(quote);
+
+    await LedgerEngine.logAuditAsync({
       businessId: quote.businessId,
       entityType: 'policy',
       entityId: quote.id,
