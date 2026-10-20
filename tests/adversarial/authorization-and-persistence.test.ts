@@ -6,7 +6,7 @@ import { LedgerEngine } from '@/lib/ledger';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
 import { computeApprovalSignature } from '@/lib/approval-engine';
 import { Quote, ProcurementRequest, PaymentAttempt, Approval } from '@/lib/types';
-import { persistRequestToSupabase } from '@/lib/supabase';
+import { persistRequestToSupabase, resetSupabaseClientForTesting } from '@/lib/supabase';
 import { DEMO_MEMBERS } from '@/lib/catalog';
 
 describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
@@ -384,11 +384,13 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
 
   describe('Supabase Error Surfacing', () => {
     it('surfaces database errors when Supabase is configured and a write fails', async () => {
+      resetSupabaseClientForTesting();
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-supabase-project.supabase.co';
       process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key';
 
-      // Attempting persist with invalid mock connection will fail network / throw
+      // When Supabase is configured, failed initialization or write must throw, never swallow
       await expect(persistRequestToSupabase(mockRequest)).rejects.toThrow();
+      resetSupabaseClientForTesting();
     });
   });
 });

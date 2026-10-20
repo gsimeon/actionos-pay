@@ -46,22 +46,29 @@ export function getSupabase(): SupabaseClient | null {
   }
 }
 
-export const isSupabaseConfigured = (): boolean => {
+export function resetSupabaseClientForTesting(): void {
+  cachedSupabase = null;
+}
+
+export function isSupabaseConfigured(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
       (process.env.SUPABASE_SERVICE_ROLE_KEY ||
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
         process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
   );
-};
+}
 
 /**
  * Persists an immutable audit event to Supabase.
  * Throws on failure when Supabase is configured.
  */
 export async function persistAuditToSupabase(event: AuditEvent): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error } = await supabase.from('audit_events').insert({
     id: event.id,
@@ -86,8 +93,11 @@ export async function persistAuditToSupabase(event: AuditEvent): Promise<boolean
  * Throws on failure when Supabase is configured.
  */
 export async function persistRequestToSupabase(req: ProcurementRequest): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error } = await supabase.from('procurement_requests').upsert({
     id: req.id,
@@ -115,8 +125,11 @@ export async function persistRequestToSupabase(req: ProcurementRequest): Promise
  * Throws on failure when Supabase is configured.
  */
 export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error: quoteErr } = await supabase.from('quotes').upsert({
     id: quote.id,
@@ -166,8 +179,11 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
  * Throws on failure when Supabase is configured.
  */
 export async function persistApprovalToSupabase(approval: Approval): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error } = await supabase.from('approvals').insert({
     id: approval.id,
@@ -197,8 +213,11 @@ export async function persistApprovalToSupabase(approval: Approval): Promise<boo
  * Throws on failure when Supabase is configured.
  */
 export async function persistPaymentToSupabase(payment: PaymentAttempt): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error } = await supabase.from('payment_attempts').upsert({
     id: payment.id,
@@ -228,8 +247,11 @@ export async function persistPaymentToSupabase(payment: PaymentAttempt): Promise
  * Throws on failure when Supabase is configured.
  */
 export async function persistWebhookToSupabase(webhook: WebhookEventRecord): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
 
   const { error } = await supabase.from('webhook_events').upsert({
     id: webhook.id,
