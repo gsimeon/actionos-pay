@@ -9,6 +9,13 @@ import { calculateQuote } from '../../src/lib/quote-engine';
 import { ProcurementRequest } from '../../src/lib/types';
 import { randomUUID } from 'crypto';
 
+import { POST as planRoute } from '../../src/app/api/procurement/plan/route';
+import { POST as quoteRoute } from '../../src/app/api/procurement/quote/route';
+import { POST as approveRoute } from '../../src/app/api/procurement/approve/route';
+import { POST as createOrderRoute } from '../../src/app/api/paypal/create-order/route';
+import { POST as captureOrderRoute } from '../../src/app/api/paypal/capture-order/route';
+import { POST as webhookRoute } from '../../src/app/api/paypal/webhook/route';
+
 describe('End-to-End Procurement Flow Integration', () => {
   beforeEach(() => {
     LedgerEngine.reset();
@@ -40,7 +47,7 @@ describe('End-to-End Procurement Flow Integration', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    LedgerEngine.saveRequest(req);
+    await LedgerEngine.saveRequestAsync(req);
 
     // Step 2: Calculate server-side authoritative quote
     const supplierId = plan.suggestedSupplierId || '00000000-0000-4000-8000-000000000100';
@@ -51,7 +58,7 @@ describe('End-to-End Procurement Flow Integration', () => {
       items: plan.items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
     });
 
-    LedgerEngine.saveQuote(quote);
+    await LedgerEngine.saveQuoteAsync(quote);
     expect(quote.status).toBe('active');
     expect(quote.totalCents).toBeLessThanOrEqual(plan.budgetLimitCents);
 
@@ -73,7 +80,7 @@ describe('End-to-End Procurement Flow Integration', () => {
       budgetLimitCents: req.budgetLimitCents,
       requesterId: requester.userId,
     });
-    LedgerEngine.saveApproval(approval);
+    await LedgerEngine.saveApprovalAsync(approval);
 
     expect(verifyApprovalBinding(approval, quote).valid).toBe(true);
     expect(LedgerEngine.getRequest(requestId)?.status).toBe('approved');
@@ -83,7 +90,7 @@ describe('End-to-End Procurement Flow Integration', () => {
       quote,
       approval,
     });
-    LedgerEngine.savePaymentAttempt(orderRes.paymentAttempt);
+    await LedgerEngine.savePaymentAttemptAsync(orderRes.paymentAttempt);
 
     expect(orderRes.orderId).toBeDefined();
     expect(orderRes.paymentAttempt.status).toBe('created');
@@ -94,7 +101,7 @@ describe('End-to-End Procurement Flow Integration', () => {
       orderId: orderRes.orderId,
       paymentAttempt: orderRes.paymentAttempt,
     });
-    LedgerEngine.savePaymentAttempt(captureRes.paymentAttempt);
+    await LedgerEngine.savePaymentAttemptAsync(captureRes.paymentAttempt);
 
     expect(captureRes.status).toBe('COMPLETED');
     expect(captureRes.paymentAttempt.status).toBe('captured');
@@ -109,5 +116,116 @@ describe('End-to-End Procurement Flow Integration', () => {
     expect(actions).toContain('QUOTE_APPROVED');
     expect(actions).toContain('PAYMENT_ATTEMPT_CREATED');
     expect(actions).toContain('PAYMENT_CAPTURED');
+  });
+
+  it('executes full procurement and payment lifecycle via actual HTTP Route handlers', async () => {
+    const requester = DEMO_MEMBERS.find((m) => m.role === 'requester')!;
+    const approver = DEMO_MEMBERS.find((m) => m.role === 'approver')!;
+
+    // Step 1: POST /api/procurement/plan
+    const planReq = new Request('http://localhost/api/procurement/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'Order 2 Dell XPS 15 laptops from AfriTech for our engineering team. Budget under $5,000.',
+        budgetLimitCents: 500000,
+        requesterId: requester.userId,
+      }),
+    });
+    const planRes = await planRoute(planReq);
+    expect(planRes.status).toBe(200);
+    const planJson = await planRes.json();
+    expect(planJson.request.id).toBeDefined();
+    const requestId = planJson.request.id;
+
+    // Step 2: POST /api/procurement/quote
+    const quoteReq = new Request('http://localhost/api/procurement/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId,
+        supplierId: '00000000-0000-4000-8000-000000000100',
+        items: [{ sku: 'LAP-DELL-XPS15', quantity: 2 }],
+      }),
+    });
+    const quoteRes = await quoteRoute(quoteReq);
+    expect(quoteRes.status).toBe(200);
+    const quoteJson = await quoteRes.json();
+    expect(quoteJson.quote.id).toBeDefined();
+    const quoteId = quoteJson.quote.id;
+    const totalCents = quoteJson.quote.totalCents;
+
+    // Step 3: POST /api/procurement/approve
+    const approveReq = new Request('http://localhost/api/procurement/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quoteId,
+        decision: 'approved',
+        approverUserId: approver.userId,
+        reason: 'Approved via full HTTP integration test.',
+      }),
+    });
+    const approveRes = await approveRoute(approveReq);
+    expect(approveRes.status).toBe(200);
+    const approveJson = await approveRes.json();
+    expect(approveJson.approval.digitalSignature).toBeDefined();
+
+    // Step 4: POST /api/paypal/create-order
+    const createOrderReq = new Request('http://localhost/api/paypal/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quoteId }),
+    });
+    const createOrderRes = await createOrderRoute(createOrderReq);
+    expect(createOrderRes.status).toBe(200);
+    const createOrderJson = await createOrderRes.json();
+    expect(createOrderJson.orderId).toBeDefined();
+    const orderId = createOrderJson.orderId;
+
+    // Step 5: POST /api/paypal/capture-order
+    const captureReq = new Request('http://localhost/api/paypal/capture-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId }),
+    });
+    const captureRes = await captureOrderRoute(captureReq);
+    expect(captureRes.status).toBe(200);
+    const captureJson = await captureRes.json();
+    expect(captureJson.status).toBe('COMPLETED');
+    const captureId = captureJson.captureId;
+
+    // Step 6: POST /api/paypal/webhook (Reconciliation & Fulfillment)
+    const webhookReq = new Request('http://localhost/api/paypal/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'paypal-transmission-sig': 'valid-simulation-sig-12345',
+      },
+      body: JSON.stringify({
+        id: `WH-E2E-${randomUUID()}`,
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: captureId,
+          status: 'COMPLETED',
+          supplementary_data: { related_ids: { order_id: orderId } },
+          amount: {
+            value: (totalCents / 100).toFixed(2),
+            currency_code: 'USD',
+          },
+        },
+      }),
+    });
+    const webhookRes = await webhookRoute(webhookReq);
+    expect(webhookRes.status).toBe(200);
+    const webhookJson = await webhookRes.json();
+    expect(webhookJson.status).toBe('processed');
+
+    // Step 7: Verify final state across ledger
+    const finalReq = await LedgerEngine.getRequestAsync(requestId);
+    expect(finalReq?.status).toBe('fulfilled');
+
+    const finalPayment = await LedgerEngine.getPaymentByOrderIdAsync(orderId);
+    expect(finalPayment?.status).toBe('captured');
   });
 });

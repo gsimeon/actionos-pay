@@ -3,7 +3,7 @@
 // { quoteId, version, totalCents, currency, supplierId, quoteChecksum }
 // Any change to the quote invalidates the approval.
 
-import { createHash, createHmac, randomUUID } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { evaluatePolicy } from './policy-engine';
 import { verifyQuoteIntegrity } from './quote-engine';
 import { Approval, Quote, TeamMember } from './types';
@@ -17,12 +17,36 @@ export interface CreateApprovalParams {
   requesterId?: string;
 }
 
+/**
+ * Constant-time hex string comparison to protect against timing attacks.
+ */
+export function safeTimingCompareHex(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  try {
+    const bufA = Buffer.from(a, 'hex');
+    const bufB = Buffer.from(b, 'hex');
+    if (bufA.length !== bufB.length || bufA.length === 0) return false;
+    return timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Retrieves the cryptographic secret key used for HMAC-SHA256 approval signing.
+ * Fails closed if missing or below minimum cryptographic strength (32 characters).
+ */
 export function getApprovalSigningSecret(): string {
-  return (
+  const secret =
     process.env.APPROVAL_SIGNING_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    'actionos-pay-internal-hmac-approval-secret'
-  );
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!secret || secret.trim().length < 32) {
+    throw new Error(
+      'Cryptographic Failure: Dedicated APPROVAL_SIGNING_SECRET (or valid SUPABASE_SERVICE_ROLE_KEY >= 32 chars) is required. Insecure default or weak fallback secrets are rejected.'
+    );
+  }
+  return secret.trim();
 }
 
 /**
@@ -40,8 +64,9 @@ export function computeApprovalSignature(
     approverId: string;
     decision: string;
   },
-  secretKey = getApprovalSigningSecret()
+  secretKey?: string
 ): string {
+  const effectiveKey = secretKey || getApprovalSigningSecret();
   const payload = [
     params.quoteId,
     params.quoteVersion,
@@ -53,11 +78,13 @@ export function computeApprovalSignature(
     params.decision,
   ].join('::');
 
-  return createHmac('sha256', secretKey).update(payload).digest('hex');
+  return createHmac('sha256', effectiveKey).update(payload).digest('hex');
 }
 
 /**
  * Verifies that an approval strictly binds to the given quote and has not been invalidated.
+ * Enforces secret-backed HMAC-SHA256 verification via constant-time comparison.
+ * Legacy unkeyed SHA-256 signatures are strictly rejected.
  */
 export function verifyApprovalBinding(approval: Approval, quote: Quote): {
   valid: boolean;
@@ -101,36 +128,26 @@ export function verifyApprovalBinding(approval: Approval, quote: Quote): {
     reasons.push('Underlying quote checksum failed: quote content was altered.');
   }
 
-  const expectedHmacSignature = computeApprovalSignature({
-    quoteId: quote.id,
-    quoteVersion: quote.version,
-    quoteChecksum: quote.checksumHash,
-    totalCents: quote.totalCents,
-    currency: quote.currency,
-    supplierId: quote.supplierId,
-    approverId: approval.approverId,
-    decision: approval.decision,
-  });
+  try {
+    const expectedHmacSignature = computeApprovalSignature({
+      quoteId: quote.id,
+      quoteVersion: quote.version,
+      quoteChecksum: quote.checksumHash,
+      totalCents: quote.totalCents,
+      currency: quote.currency,
+      supplierId: quote.supplierId,
+      approverId: approval.approverId,
+      decision: approval.decision,
+    });
 
-  // Backward compatibility fallback for legacy sha256
-  const payload = [
-    quote.id,
-    quote.version,
-    quote.checksumHash,
-    quote.totalCents,
-    quote.currency,
-    quote.supplierId,
-    approval.approverId,
-    approval.decision,
-  ].join('::');
-  const legacySha256Signature = createHash('sha256').update(payload).digest('hex');
-
-  if (
-    approval.digitalSignature !== expectedHmacSignature &&
-    approval.digitalSignature !== legacySha256Signature
-  ) {
+    if (!safeTimingCompareHex(approval.digitalSignature, expectedHmacSignature)) {
+      reasons.push(
+        'Approval digital signature mismatch: signature failed cryptographic HMAC-SHA256 verification or does not seal current quote terms. Legacy unkeyed SHA-256 signatures are prohibited.'
+      );
+    }
+  } catch (err) {
     reasons.push(
-      'Approval digital signature mismatch: signature does not seal current quote terms or failed cryptographic HMAC verification.'
+      `Approval signature verification error: ${err instanceof Error ? err.message : 'Unknown cryptographic error'}`
     );
   }
 

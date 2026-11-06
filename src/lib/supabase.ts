@@ -6,11 +6,13 @@
 // 3. Graceful in-memory fallback is active only when credentials are not configured.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 import {
   Approval,
   AuditEvent,
   PaymentAttempt,
   ProcurementRequest,
+  ProcurementStatus,
   Product,
   Quote,
   Supplier,
@@ -189,7 +191,9 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
 
     const { error: itemsErr } = await supabase.from('quote_items').upsert(itemsPayload);
     if (itemsErr) {
-      throw new Error(`Supabase quote_items persistence failed: ${itemsErr.message} (${itemsErr.code})`);
+      // Rollback inserted quote row to prevent partial orphan state
+      await supabase.from('quotes').delete().eq('id', quote.id);
+      throw new Error(`Supabase quote_items persistence failed (quote rollback applied): ${itemsErr.message} (${itemsErr.code})`);
     }
   }
 
@@ -646,4 +650,233 @@ export async function fetchMembershipFromSupabase(
   } catch {
     return null;
   }
+}
+
+export interface WebhookClaimResult {
+  claimed: boolean;
+  status: 'received' | 'duplicate' | 'in_progress' | 'retryable';
+  record: WebhookEventRecord | null;
+}
+
+/**
+ * Atomically claims a webhook event in Supabase to eliminate race conditions between concurrent deliveries.
+ */
+export async function claimWebhookEventInSupabase(
+  eventRecord: WebhookEventRecord
+): Promise<WebhookClaimResult> {
+  if (!isSupabaseConfigured()) {
+    return { claimed: true, status: 'received', record: eventRecord };
+  }
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
+
+  // 1. Check existing record
+  const { data: existing, error: selectErr } = await supabase
+    .from('webhook_events')
+    .select('*')
+    .eq('event_id', eventRecord.eventId)
+    .maybeSingle();
+
+  if (selectErr) {
+    throw new Error(`Failed to query webhook event: ${selectErr.message}`);
+  }
+
+  if (existing) {
+    if (existing.status === 'processed' || existing.status === 'duplicate') {
+      return {
+        claimed: false,
+        status: 'duplicate',
+        record: {
+          id: existing.id,
+          provider: existing.provider,
+          eventId: existing.event_id,
+          eventType: existing.event_type,
+          signatureVerified: existing.signature_verified,
+          payload: existing.payload,
+          status: existing.status,
+          processedAt: existing.processed_at,
+          createdAt: existing.created_at,
+        },
+      };
+    }
+
+    if (existing.status === 'received') {
+      return {
+        claimed: false,
+        status: 'in_progress',
+        record: {
+          id: existing.id,
+          provider: existing.provider,
+          eventId: existing.event_id,
+          eventType: existing.event_type,
+          signatureVerified: existing.signature_verified,
+          payload: existing.payload,
+          status: existing.status,
+          processedAt: existing.processed_at,
+          createdAt: existing.created_at,
+        },
+      };
+    }
+
+    if (existing.status === 'failed') {
+      // Re-activate failed webhook event for retry
+      const { data: updated, error: updateErr } = await supabase
+        .from('webhook_events')
+        .update({
+          status: 'received',
+          processed_at: null,
+          payload: eventRecord.payload,
+        })
+        .eq('id', existing.id)
+        .eq('status', 'failed')
+        .select()
+        .single();
+
+      if (updateErr || !updated) {
+        return { claimed: false, status: 'duplicate', record: null };
+      }
+
+      return {
+        claimed: true,
+        status: 'retryable',
+        record: {
+          id: updated.id,
+          provider: updated.provider,
+          eventId: updated.event_id,
+          eventType: updated.event_type,
+          signatureVerified: updated.signature_verified,
+          payload: updated.payload,
+          status: updated.status,
+          processedAt: updated.processed_at,
+          createdAt: updated.created_at,
+        },
+      };
+    }
+  }
+
+  // 2. Insert new webhook event with status 'received'
+  const { data: inserted, error: insertErr } = await supabase
+    .from('webhook_events')
+    .insert({
+      id: eventRecord.id,
+      provider: eventRecord.provider,
+      event_id: eventRecord.eventId,
+      event_type: eventRecord.eventType,
+      signature_verified: eventRecord.signatureVerified,
+      payload: eventRecord.payload,
+      status: 'received',
+      created_at: eventRecord.createdAt,
+    })
+    .select()
+    .maybeSingle();
+
+  if (insertErr) {
+    // Unique violation (PostgreSQL code 23505) indicates concurrent identical arrival
+    if (insertErr.code === '23505') {
+      return { claimed: false, status: 'duplicate', record: null };
+    }
+    throw new Error(`Failed to claim webhook event: ${insertErr.message} (${insertErr.code})`);
+  }
+
+  if (!inserted) {
+    return { claimed: false, status: 'duplicate', record: null };
+  }
+
+  return {
+    claimed: true,
+    status: 'received',
+    record: {
+      id: inserted.id,
+      provider: inserted.provider,
+      eventId: inserted.event_id,
+      eventType: inserted.event_type,
+      signatureVerified: inserted.signature_verified,
+      payload: inserted.payload,
+      status: inserted.status,
+      processedAt: inserted.processed_at,
+      createdAt: inserted.created_at,
+    },
+  };
+}
+
+/**
+ * Updates the procurement request status in Supabase.
+ */
+export async function updateRequestStatusInSupabase(
+  id: string,
+  status: ProcurementStatus
+): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Supabase client uninitialized');
+
+  const { error } = await supabase
+    .from('procurement_requests')
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Failed to update request status in Supabase: ${error.message} (${error.code})`);
+  }
+  return true;
+}
+
+/**
+ * Reconciles captured payment, transitions request state to fulfilled,
+ * marks webhook event processed, and logs immutable audit trail.
+ */
+export async function reconcilePaymentCaptureInSupabase(params: {
+  payment: PaymentAttempt;
+  webhookRecord: WebhookEventRecord;
+  quote: Quote;
+  providerCaptureId: string;
+}): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { payment, webhookRecord, quote, providerCaptureId } = params;
+
+  // 1. Update Payment Record to captured
+  await persistPaymentToSupabase({
+    ...payment,
+    status: 'captured',
+    providerCaptureId,
+    updatedAt: new Date().toISOString(),
+  });
+
+  // 2. Update Webhook Event Record to processed
+  await updateWebhookStatusInSupabase(webhookRecord.id, 'processed', new Date().toISOString());
+
+  // 3. Transition Procurement Request to fulfilled
+  if (quote.requestId) {
+    await updateRequestStatusInSupabase(quote.requestId, 'fulfilled');
+  }
+
+  // 4. Log Immutable Audit Record
+  await persistAuditToSupabase({
+    id: randomUUID(),
+    businessId: payment.businessId,
+    entityType: 'payment',
+    entityId: payment.id,
+    actorId: 'paypal_webhook',
+    actorRole: 'external_gateway',
+    action: 'PAYMENT_CAPTURED_AND_RECONCILED',
+    payload: {
+      eventId: webhookRecord.eventId,
+      amountCents: payment.amountCents,
+      currency: payment.currency,
+      providerCaptureId,
+      quoteId: quote.id,
+      requestId: quote.requestId,
+    },
+    createdAt: new Date().toISOString(),
+  });
 }

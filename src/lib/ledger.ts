@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'crypto';
 import {
+  claimWebhookEventInSupabase,
   fetchApprovalFromSupabase,
   fetchAuditEventsFromSupabase,
   fetchPaymentByOrderIdFromSupabase,
@@ -20,6 +21,7 @@ import {
   persistQuoteToSupabase,
   persistRequestToSupabase,
   persistWebhookToSupabase,
+  reconcilePaymentCaptureInSupabase,
 } from './supabase';
 import {
   Approval,
@@ -104,6 +106,11 @@ export class LedgerEngine {
     action: string;
     payload: Record<string, unknown>;
   }): AuditEvent {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous logAudit is prohibited when Supabase is configured. Use logAuditAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     const event: AuditEvent = {
       id: randomUUID(),
@@ -117,11 +124,6 @@ export class LedgerEngine {
       createdAt: new Date().toISOString(),
     };
     store.auditEvents.push(event);
-    if (isSupabaseConfigured()) {
-      persistAuditToSupabase(event).catch((err) => {
-        console.error('Async audit log failed to persist to Supabase:', err);
-      });
-    }
     return event;
   }
 
@@ -135,13 +137,13 @@ export class LedgerEngine {
   }
 
   static saveRequest(req: ProcurementRequest): void {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous saveRequest is prohibited when Supabase is configured. Use saveRequestAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     store.requests.set(req.id, req);
-    if (isSupabaseConfigured()) {
-      persistRequestToSupabase(req).catch((err) => {
-        console.error('saveRequest background persist error:', err);
-      });
-    }
   }
 
   static async getRequestAsync(id: string): Promise<ProcurementRequest | undefined> {
@@ -251,14 +253,14 @@ export class LedgerEngine {
     });
   }
 
-  static saveQuote(quote: Quote, actorId = 'system', actorRole = 'quote_engine'): void {
+  static saveQuote(quote: Quote): void {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous saveQuote is prohibited when Supabase is configured. Use saveQuoteAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     store.quotes.set(quote.id, quote);
-    if (isSupabaseConfigured()) {
-      persistQuoteToSupabase(quote).catch((err) => {
-        console.error('saveQuote persist error:', err);
-      });
-    }
 
     const req = store.requests.get(quote.requestId);
     if (req) {
@@ -266,27 +268,7 @@ export class LedgerEngine {
       req.status = 'quoted';
       req.updatedAt = new Date().toISOString();
       store.requests.set(req.id, req);
-      if (isSupabaseConfigured()) {
-        persistRequestToSupabase(req).catch(() => {});
-      }
     }
-
-    this.logAudit({
-      businessId: quote.businessId,
-      entityType: 'quote',
-      entityId: quote.id,
-      actorId,
-      actorRole,
-      action: 'QUOTE_CALCULATED',
-      payload: {
-        version: quote.version,
-        supplierName: quote.supplierName,
-        totalCents: quote.totalCents,
-        currency: quote.currency,
-        checksumHash: quote.checksumHash,
-        itemCount: quote.items.length,
-      },
-    });
   }
 
   static async getQuoteAsync(id: string): Promise<Quote | undefined> {
@@ -350,50 +332,26 @@ export class LedgerEngine {
   }
 
   static saveApproval(approval: Approval): void {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous saveApproval is prohibited when Supabase is configured. Use saveApprovalAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     store.approvals.set(approval.id, approval);
-    if (isSupabaseConfigured()) {
-      persistApprovalToSupabase(approval).catch((err) => {
-        console.error('saveApproval persist error:', err);
-      });
-    }
 
     const quote = store.quotes.get(approval.quoteId);
     if (quote) {
       quote.status = approval.decision === 'approved' ? 'approved' : 'rejected';
       store.quotes.set(quote.id, quote);
-      if (isSupabaseConfigured()) {
-        persistQuoteToSupabase(quote).catch(() => {});
-      }
 
       const req = store.requests.get(quote.requestId);
       if (req) {
         req.status = approval.decision === 'approved' ? 'approved' : 'rejected';
         req.updatedAt = new Date().toISOString();
         store.requests.set(req.id, req);
-        if (isSupabaseConfigured()) {
-          persistRequestToSupabase(req).catch(() => {});
-        }
       }
     }
-
-    this.logAudit({
-      businessId: approval.businessId,
-      entityType: 'approval',
-      entityId: approval.id,
-      actorId: approval.approverId,
-      actorRole: approval.approverRole,
-      action: approval.decision === 'approved' ? 'QUOTE_APPROVED' : 'QUOTE_REJECTED',
-      payload: {
-        quoteId: approval.quoteId,
-        quoteVersion: approval.quoteVersion,
-        approvedTotalCents: approval.approvedTotalCents,
-        currency: approval.approvedCurrency,
-        decision: approval.decision,
-        reason: approval.reason,
-        digitalSignature: approval.digitalSignature,
-      },
-    });
   }
 
   static async getApprovalForQuoteAsync(quoteId: string): Promise<Approval | undefined> {
@@ -460,13 +418,13 @@ export class LedgerEngine {
   }
 
   static savePaymentAttempt(payment: PaymentAttempt): void {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous savePaymentAttempt is prohibited when Supabase is configured. Use savePaymentAttemptAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     store.payments.set(payment.id, payment);
-    if (isSupabaseConfigured()) {
-      persistPaymentToSupabase(payment).catch((err) => {
-        console.error('savePaymentAttempt persist error:', err);
-      });
-    }
 
     const quote = store.quotes.get(payment.quoteId);
     if (quote) {
@@ -477,35 +435,8 @@ export class LedgerEngine {
         if (payment.status === 'failed') req.status = 'approved';
         req.updatedAt = new Date().toISOString();
         store.requests.set(req.id, req);
-        if (isSupabaseConfigured()) {
-          persistRequestToSupabase(req).catch(() => {});
-        }
       }
     }
-
-    this.logAudit({
-      businessId: payment.businessId,
-      entityType: 'payment',
-      entityId: payment.id,
-      actorId: 'system',
-      actorRole: 'paypal_service',
-      action:
-        payment.status === 'captured'
-          ? 'PAYMENT_CAPTURED'
-          : payment.status === 'failed'
-          ? 'PAYMENT_FAILED'
-          : 'PAYMENT_ATTEMPT_CREATED',
-      payload: {
-        provider: payment.provider,
-        providerOrderId: payment.providerOrderId,
-        providerCaptureId: payment.providerCaptureId,
-        amountCents: payment.amountCents,
-        currency: payment.currency,
-        status: payment.status,
-        idempotencyKey: payment.idempotencyKey,
-        errorMessage: payment.errorMessage,
-      },
-    });
   }
 
   static async getPaymentByOrderIdAsync(orderId: string): Promise<PaymentAttempt | undefined> {
@@ -550,26 +481,112 @@ export class LedgerEngine {
   }
 
   static recordWebhook(rec: WebhookEventRecord): void {
+    if (isSupabaseConfigured()) {
+      throw new Error(
+        'Architecture Invariant Violation: Synchronous recordWebhook is prohibited when Supabase is configured. Use recordWebhookAsync() to guarantee authoritative database persistence.'
+      );
+    }
     const store = getStore();
     store.webhooks.set(rec.eventId, rec);
+  }
+
+  /**
+   * Atomically claims a webhook event to eliminate race conditions between concurrent webhook deliveries.
+   */
+  static async claimWebhookEventAsync(rec: WebhookEventRecord): Promise<{
+    claimed: boolean;
+    status: 'received' | 'duplicate' | 'in_progress' | 'retryable';
+    record: WebhookEventRecord;
+  }> {
     if (isSupabaseConfigured()) {
-      persistWebhookToSupabase(rec).catch((err) => {
-        console.error('recordWebhook persist error:', err);
+      const res = await claimWebhookEventInSupabase(rec);
+      if (res.record) {
+        getStore().webhooks.set(res.record.eventId, res.record);
+      }
+      return {
+        claimed: res.claimed,
+        status: res.status,
+        record: res.record || rec,
+      };
+    }
+
+    const store = getStore();
+    const existing = store.webhooks.get(rec.eventId);
+    if (existing) {
+      if (existing.status === 'processed' || existing.status === 'duplicate') {
+        return { claimed: false, status: 'duplicate', record: existing };
+      }
+      if (existing.status === 'received') {
+        return { claimed: false, status: 'in_progress', record: existing };
+      }
+      if (existing.status === 'failed') {
+        existing.status = 'received';
+        existing.payload = rec.payload;
+        existing.processedAt = undefined;
+        return { claimed: true, status: 'retryable', record: existing };
+      }
+    }
+
+    store.webhooks.set(rec.eventId, rec);
+    return { claimed: true, status: 'received', record: rec };
+  }
+
+  /**
+   * Reconciles payment capture, transitions request to fulfilled, marks webhook processed,
+   * and records immutable audit log.
+   */
+  static async reconcilePaymentCaptureAsync(params: {
+    payment: PaymentAttempt;
+    webhookRecord: WebhookEventRecord;
+    quote: Quote;
+    providerCaptureId: string;
+  }): Promise<void> {
+    const { payment, webhookRecord, quote, providerCaptureId } = params;
+
+    // Mutate state in memory
+    payment.status = 'captured';
+    payment.providerCaptureId = providerCaptureId;
+    payment.updatedAt = new Date().toISOString();
+
+    webhookRecord.status = 'processed';
+    webhookRecord.processedAt = new Date().toISOString();
+
+    // Database persistence when Supabase configured
+    if (isSupabaseConfigured()) {
+      await reconcilePaymentCaptureInSupabase({
+        payment,
+        webhookRecord,
+        quote,
+        providerCaptureId,
       });
     }
 
-    this.logAudit({
-      businessId: 'SYSTEM',
-      entityType: 'webhook',
-      entityId: rec.id,
+    // In-memory store updates
+    const store = getStore();
+    store.payments.set(payment.id, payment);
+    store.webhooks.set(webhookRecord.eventId, webhookRecord);
+
+    const req = store.requests.get(quote.requestId);
+    if (req) {
+      req.status = 'fulfilled';
+      req.updatedAt = new Date().toISOString();
+      store.requests.set(req.id, req);
+    }
+
+    await this.logAuditAsync({
+      businessId: payment.businessId,
+      entityType: 'payment',
+      entityId: payment.id,
       actorId: 'paypal_webhook',
       actorRole: 'external_gateway',
-      action: 'WEBHOOK_RECEIVED',
+      action: 'PAYMENT_CAPTURED_AND_RECONCILED',
       payload: {
-        eventId: rec.eventId,
-        eventType: rec.eventType,
-        signatureVerified: rec.signatureVerified,
-        status: rec.status,
+        eventId: webhookRecord.eventId,
+        amountCents: payment.amountCents,
+        currency: payment.currency,
+        providerCaptureId,
+        quoteId: quote.id,
+        requestId: quote.requestId,
       },
     });
   }

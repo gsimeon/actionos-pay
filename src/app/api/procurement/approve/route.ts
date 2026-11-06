@@ -29,45 +29,80 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
     }
 
-    // Server-side identity resolution: Extract authenticated session or explicit approver ID
-    let resolvedUserId = approverUserId;
-    const authHeader = req.headers.get('authorization');
-    if (authHeader?.startsWith('Bearer ') && isSupabaseConfigured()) {
-      const token = authHeader.slice(7);
+    let approver: TeamMember | null = null;
+
+    if (isSupabaseConfigured()) {
+      // Production Mode: Mandatory Supabase Auth session & authoritative membership lookup
+      const authHeader = req.headers.get('authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return NextResponse.json(
+          { error: 'approverUserId is required. Anonymous or unauthenticated approvals are prohibited. Bearer session token is required when Supabase is configured.' },
+          { status: 401 }
+        );
+      }
+
+      const token = authHeader.slice(7).trim();
+      if (!token) {
+        return NextResponse.json(
+          { error: 'Empty bearer session token provided.' },
+          { status: 401 }
+        );
+      }
+
       const supabase = getSupabase();
-      if (supabase) {
-        const { data: authData, error: authErr } = await supabase.auth.getUser(token);
-        if (!authErr && authData?.user) {
-          resolvedUserId = authData.user.id;
-        }
+      if (!supabase) {
+        return NextResponse.json(
+          { error: 'Supabase authentication service unavailable.' },
+          { status: 503 }
+        );
+      }
+
+      const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+      if (authErr || !authData?.user) {
+        return NextResponse.json(
+          { error: `Authentication failed: ${authErr?.message || 'Invalid or expired session token.'}` },
+          { status: 401 }
+        );
+      }
+
+      const authenticatedUserId = authData.user.id;
+
+      // Reject attempts to spoof approverUserId if supplied in request body
+      if (approverUserId && approverUserId !== authenticatedUserId) {
+        return NextResponse.json(
+          { error: `Forbidden: Client-supplied approverUserId ("${approverUserId}") does not match authenticated user session ("${authenticatedUserId}").` },
+          { status: 403 }
+        );
+      }
+
+      // Mandatory database membership resolution
+      approver = await fetchMembershipFromSupabase(authenticatedUserId, quote.businessId);
+      if (!approver) {
+        return NextResponse.json(
+          { error: `Approver identity "${authenticatedUserId}" could not be verified in organization records.` },
+          { status: 403 }
+        );
+      }
+    } else {
+      // Demo Mode: Local member lookup (active only when Supabase is not configured)
+      if (!approverUserId) {
+        return NextResponse.json(
+          { error: 'approverUserId is required. Anonymous or unauthenticated approvals are prohibited.' },
+          { status: 401 }
+        );
+      }
+
+      approver = DEMO_MEMBERS.find((m) => m.userId === approverUserId) || null;
+      if (!approver) {
+        return NextResponse.json(
+          { error: `Approver identity "${approverUserId}" could not be verified in organization records.` },
+          { status: 403 }
+        );
       }
     }
 
-    if (!resolvedUserId) {
-      return NextResponse.json(
-        { error: 'approverUserId is required. Anonymous or unauthenticated approvals are prohibited.' },
-        { status: 401 }
-      );
-    }
-
-    // Authoritative membership and role lookup from Supabase when configured
-    let approver: TeamMember | null = null;
-    if (isSupabaseConfigured()) {
-      approver = await fetchMembershipFromSupabase(resolvedUserId, quote.businessId);
-    }
-    if (!approver) {
-      approver = DEMO_MEMBERS.find((m) => m.userId === resolvedUserId) || null;
-    }
-
-    if (!approver) {
-      return NextResponse.json(
-        { error: `Approver identity "${resolvedUserId}" could not be verified in organization records.` },
-        { status: 403 }
-      );
-    }
-
-    // Enforce business tenant boundary
-    if (approver.businessId !== quote.businessId && approver.businessId !== '00000000-0000-4000-8000-000000000001') {
+    // Strict business tenant boundary enforcement (no hard-coded exceptions)
+    if (approver.businessId !== quote.businessId) {
       return NextResponse.json(
         { error: `Approver "${approver.userName}" does not belong to business "${quote.businessId}".` },
         { status: 403 }

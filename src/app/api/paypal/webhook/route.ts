@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
+import { verifyApprovalBinding } from '@/lib/approval-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { verifyWebhookSignature } from '@/lib/paypal-service';
+import { WebhookEventRecord } from '@/lib/types';
 import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
@@ -34,32 +36,27 @@ export async function POST(req: Request) {
     const eventId = (payload.id as string) || `SIM-EVT-${randomUUID().slice(0, 8)}`;
     const eventType = (payload.event_type as string) || 'UNKNOWN_EVENT';
 
-    // 2. Database-Backed Deduplication & Idempotency Check
-    const existing = await LedgerEngine.getWebhookEventAsync(eventId);
-    if (existing && (existing.status === 'processed' || existing.status === 'duplicate')) {
+    // 2. Conflict-Safe Atomic Webhook Claim & Idempotency Check
+    const initialWebhookRecord: WebhookEventRecord = {
+      id: randomUUID(),
+      provider: 'paypal',
+      eventId,
+      eventType,
+      signatureVerified: true,
+      payload,
+      status: 'received',
+      createdAt: new Date().toISOString(),
+    };
+
+    const claimResult = await LedgerEngine.claimWebhookEventAsync(initialWebhookRecord);
+    if (!claimResult.claimed) {
       return NextResponse.json(
         { message: 'Duplicate webhook event ignored.', eventId, status: 'duplicate' },
         { status: 200 }
       );
     }
 
-    // Initialize or re-activate webhook record with 'received' state
-    let webhookRecord = existing;
-    if (!webhookRecord) {
-      webhookRecord = {
-        id: randomUUID(),
-        provider: 'paypal',
-        eventId,
-        eventType,
-        signatureVerified: true,
-        payload,
-        status: 'received',
-        createdAt: new Date().toISOString(),
-      };
-      await LedgerEngine.recordWebhookAsync(webhookRecord);
-    } else {
-      await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'received');
-    }
+    const webhookRecord = claimResult.record;
 
     const resource = payload.resource as Record<string, unknown> | undefined;
 
@@ -159,7 +156,22 @@ export async function POST(req: Request) {
         );
       }
 
-      // Verify underlying quote and explicit approval
+      // Verify underlying quote exists
+      const quote = await LedgerEngine.getQuoteAsync(payment.quoteId);
+      if (!quote) {
+        payment.status = 'failed';
+        payment.errorMessage = `Reconciliation error: Underlying quote "${payment.quoteId}" not found.`;
+        payment.updatedAt = new Date().toISOString();
+        await LedgerEngine.savePaymentAttemptAsync(payment);
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+
+        return NextResponse.json(
+          { error: `Cannot complete payment: Quote "${payment.quoteId}" not found.`, eventId },
+          { status: 400 }
+        );
+      }
+
+      // Verify underlying quote has approved decision
       const approval = await LedgerEngine.getApprovalForQuoteAsync(payment.quoteId);
       if (!approval || approval.decision !== 'approved') {
         payment.status = 'failed';
@@ -174,13 +186,45 @@ export async function POST(req: Request) {
         );
       }
 
-      // Mark payment captured and transition request state
-      if (payment.status !== 'captured') {
-        payment.status = 'captured';
-        payment.providerCaptureId = (resource.id as string) || payment.providerCaptureId;
+      // Independent cryptographic binding verification: verify HMAC signature, checksum, terms
+      const bindingResult = verifyApprovalBinding(approval, quote);
+      if (!bindingResult.valid) {
+        payment.status = 'failed';
+        payment.errorMessage = `Reconciliation error: Approval cryptographic binding verification failed: ${bindingResult.reasons.join('; ')}`;
         payment.updatedAt = new Date().toISOString();
         await LedgerEngine.savePaymentAttemptAsync(payment);
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+
+        await LedgerEngine.logAuditAsync({
+          businessId: payment.businessId,
+          entityType: 'approval',
+          entityId: approval.id,
+          actorId: 'paypal_webhook',
+          actorRole: 'external_gateway',
+          action: 'WEBHOOK_APPROVAL_BINDING_FAILED',
+          payload: {
+            eventId,
+            quoteId: quote.id,
+            reasons: bindingResult.reasons,
+          },
+        });
+
+        return NextResponse.json(
+          {
+            error: `Cannot complete payment: Approval cryptographic binding verification failed. Reasons: ${bindingResult.reasons.join('; ')}`,
+            eventId,
+          },
+          { status: 400 }
+        );
       }
+
+      // Atomic reconciliation: mark payment captured, transition request to fulfilled, mark webhook processed
+      await LedgerEngine.reconcilePaymentCaptureAsync({
+        payment,
+        webhookRecord,
+        quote,
+        providerCaptureId: (resource.id as string) || payment.providerCaptureId || 'CAP-UNKNOWN',
+      });
     }
 
     // 4. Payment Denied / Declined / Failed: Mark attempt failed
