@@ -17,10 +17,22 @@ export interface PayPalCredentials {
   env: 'sandbox' | 'live';
 }
 
+export function isPlaceholder(val?: string | null): boolean {
+  if (!val) return true;
+  const lower = val.trim().toLowerCase();
+  return (
+    lower === '' ||
+    lower.startsWith('your-') ||
+    lower.includes('your-paypal') ||
+    lower.includes('placeholder')
+  );
+}
+
 export function getPayPalCredentials(): PayPalCredentials | null {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
+  if (isPlaceholder(clientId) || isPlaceholder(clientSecret)) return null;
   return {
     clientId,
     clientSecret,
@@ -367,7 +379,8 @@ export async function verifyWebhookSignature(params: {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID;
 
   // Real verification via PayPal API
-  if (creds && webhookId) {
+  const hasRealWebhookId = webhookId && !isPlaceholder(webhookId);
+  if (creds && hasRealWebhookId) {
     const requiredHeaders = [
       'paypal-auth-algo',
       'paypal-cert-url',

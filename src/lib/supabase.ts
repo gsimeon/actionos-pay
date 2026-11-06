@@ -19,8 +19,24 @@ import {
 
 let cachedSupabase: SupabaseClient | null = null;
 
+export function isPlaceholder(val?: string | null): boolean {
+  if (!val) return true;
+  const lower = val.trim().toLowerCase();
+  return (
+    lower === '' ||
+    lower.startsWith('your-') ||
+    lower.includes('your-project-ref') ||
+    lower.includes('your-supabase') ||
+    lower.includes('placeholder')
+  );
+}
+
 export function getSupabase(): SupabaseClient | null {
   if (cachedSupabase) return cachedSupabase;
+
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key =
@@ -51,12 +67,16 @@ export function resetSupabaseClientForTesting(): void {
 }
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      (process.env.SUPABASE_SERVICE_ROLE_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+  if (!url || !key) return false;
+  if (isPlaceholder(url) || isPlaceholder(key)) return false;
+
+  return true;
 }
 
 /**

@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createPayPalOrder, capturePayPalOrder, verifyWebhookSignature } from '@/lib/paypal-service';
+import {
+  createPayPalOrder,
+  capturePayPalOrder,
+  verifyWebhookSignature,
+  getPayPalCredentials,
+  isSimulationAllowed,
+} from '@/lib/paypal-service';
 import { Quote, Approval, PaymentAttempt } from '@/lib/types';
 import { computeApprovalSignature } from '@/lib/approval-engine';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
@@ -78,6 +84,15 @@ describe('PayPal Safety & Anti-False-Positive Invariants', () => {
   afterEach(() => {
     process.env = originalEnv;
     vi.restoreAllMocks();
+  });
+
+  it('safely treats template placeholders as unconfigured and permits simulation', () => {
+    process.env.PAYPAL_CLIENT_ID = 'your-paypal-sandbox-client-id';
+    process.env.PAYPAL_CLIENT_SECRET = 'your-paypal-sandbox-client-secret';
+    process.env.PAYPAL_WEBHOOK_ID = 'your-paypal-webhook-id';
+
+    expect(getPayPalCredentials()).toBeNull();
+    expect(isSimulationAllowed()).toBe(true);
   });
 
   it('fails loudly when PayPal credentials are set and order creation fails, never falling back to simulation', async () => {

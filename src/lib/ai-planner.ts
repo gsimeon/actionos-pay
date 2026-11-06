@@ -188,6 +188,17 @@ function parseIntentOffline(prompt: string, defaultBudgetCents: number): Structu
   return StructuredPlanSchema.parse(plan);
 }
 
+function isPlaceholder(val?: string | null): boolean {
+  if (!val) return true;
+  const lower = val.trim().toLowerCase();
+  return (
+    lower === '' ||
+    lower.startsWith('your-') ||
+    lower.includes('your-gemini') ||
+    lower.includes('placeholder')
+  );
+}
+
 /**
  * Parses natural language purchase intent into a structured plan.
  */
@@ -197,7 +208,7 @@ export async function parseProcurementIntent(
 ): Promise<StructuredPlan> {
   const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY;
 
-  if (apiKey) {
+  if (apiKey && !isPlaceholder(apiKey)) {
     try {
       const catalogueContext = DEMO_PRODUCTS.map(
         (p) => `- SKU: ${p.sku}, Name: "${p.name}", Category: ${p.category}, Unit Price: $${(p.unitPriceCents / 100).toFixed(2)}, Supplier ID: ${p.supplierId}`

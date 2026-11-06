@@ -12,10 +12,22 @@ import { AuditEvent, ProcurementRequest } from '../../src/lib/types';
 import { randomUUID } from 'crypto';
 
 describe('Supabase Client & Persistence Layer', () => {
-  it('reports isSupabaseConfigured false when environment variables are omitted', () => {
+  it('reports isSupabaseConfigured false when environment variables are omitted or placeholders', () => {
     // In test environment without NEXT_PUBLIC_SUPABASE_URL set
-    const configured = isSupabaseConfigured();
-    expect(typeof configured).toBe('boolean');
+    expect(isSupabaseConfigured()).toBe(false);
+
+    const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://your-project-ref.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'your-supabase-service-role-key';
+    expect(isSupabaseConfigured()).toBe(false);
+    expect(getSupabase()).toBeNull();
+
+    if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+    else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+    else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   it('safely handles queries gracefully when Supabase is not configured', async () => {
