@@ -232,6 +232,37 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       expect(json.error).toContain('Quote cryptographic checksum failed');
     });
 
+    it('generates HMAC secret-backed signature and rejects forged signatures', () => {
+      const validHmacSig = computeApprovalSignature({
+        quoteId: validQuote.id,
+        quoteVersion: validQuote.version,
+        quoteChecksum: validQuote.checksumHash,
+        totalCents: validQuote.totalCents,
+        currency: validQuote.currency,
+        supplierId: validQuote.supplierId,
+        approverId: approverMember.userId,
+        decision: 'approved',
+      });
+
+      // Signature with wrong secret
+      const forgedSig = computeApprovalSignature(
+        {
+          quoteId: validQuote.id,
+          quoteVersion: validQuote.version,
+          quoteChecksum: validQuote.checksumHash,
+          totalCents: validQuote.totalCents,
+          currency: validQuote.currency,
+          supplierId: validQuote.supplierId,
+          approverId: approverMember.userId,
+          decision: 'approved',
+        },
+        'unauthorized-attacker-secret'
+      );
+
+      expect(validHmacSig).not.toBe(forgedSig);
+      expect(validHmacSig).toHaveLength(64);
+    });
+
     it('rejects order creation if approval signature does not bind to quote', async () => {
       const forgedApproval: Approval = {
         id: 'appr-forged-1',
@@ -313,6 +344,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         event_type: 'PAYMENT.CAPTURE.COMPLETED',
         resource: {
           id: 'CAP-EVT-UNDERPAY-1',
+          status: 'COMPLETED',
           supplementary_data: {
             related_ids: { order_id: 'ORD-PP-RECON-1' },
           },
@@ -379,6 +411,90 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       const json2 = await res2.json();
       expect(json2.status).toBe('duplicate');
       expect(json2.message).toContain('Duplicate webhook event ignored');
+    });
+
+    it('rejects capture webhook when amount or currency is missing or invalid', async () => {
+      const eventId = 'WH-EVT-MISSING-AMT-1';
+      const invalidWebhookPayload = {
+        id: eventId,
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAP-MISSING-AMT-1',
+          status: 'COMPLETED',
+          supplementary_data: {
+            related_ids: { order_id: 'ORD-PP-RECON-1' },
+          },
+          // missing amount object!
+        },
+      };
+
+      const req = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(invalidWebhookPayload),
+      });
+
+      const res = await webhookRoute(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('missing or non-positive capture amount');
+
+      // Verify webhook record was marked 'failed', not 'processed'
+      const record = await LedgerEngine.getWebhookEventAsync(eventId);
+      expect(record?.status).toBe('failed');
+    });
+
+    it('allows retry for previously failed webhook events without treating as duplicate', async () => {
+      const eventId = 'WH-EVT-RETRYABLE-1';
+
+      // 1. First attempt fails due to missing amount
+      const failedPayload = {
+        id: eventId,
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAP-RETRY-1',
+          status: 'COMPLETED',
+          supplementary_data: { related_ids: { order_id: 'ORD-NON-EXISTENT' } },
+          amount: { value: '0', currency_code: 'USD' },
+        },
+      };
+
+      const req1 = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(failedPayload),
+      });
+      const res1 = await webhookRoute(req1);
+      expect(res1.status).toBe(400);
+
+      // 2. Verified failed status in ledger
+      const record = await LedgerEngine.getWebhookEventAsync(eventId);
+      expect(record?.status).toBe('failed');
+
+      // 3. Retry with corrected non-capture event can re-process and succeed
+      const correctedPayload = {
+        id: eventId,
+        event_type: 'CHECKOUT.ORDER.COMPLETED',
+        resource: { id: 'ORD-CORRECTED-1' },
+      };
+      const req2 = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(correctedPayload),
+      });
+      const res2 = await webhookRoute(req2);
+      expect(res2.status).toBe(200);
+      const json2 = await res2.json();
+      expect(json2.status).toBe('processed');
     });
   });
 

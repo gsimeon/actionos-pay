@@ -34,99 +34,152 @@ export async function POST(req: Request) {
     const eventId = (payload.id as string) || `SIM-EVT-${randomUUID().slice(0, 8)}`;
     const eventType = (payload.event_type as string) || 'UNKNOWN_EVENT';
 
-    // 2. Deduplication & Idempotency Check
-    const existing = LedgerEngine.getWebhookEvent(eventId);
-    if (existing) {
+    // 2. Database-Backed Deduplication & Idempotency Check
+    const existing = await LedgerEngine.getWebhookEventAsync(eventId);
+    if (existing && (existing.status === 'processed' || existing.status === 'duplicate')) {
       return NextResponse.json(
         { message: 'Duplicate webhook event ignored.', eventId, status: 'duplicate' },
         { status: 200 }
       );
     }
 
-    // Record webhook authoritatively
-    await LedgerEngine.recordWebhookAsync({
-      id: randomUUID(),
-      provider: 'paypal',
-      eventId,
-      eventType,
-      signatureVerified: true,
-      payload,
-      status: 'processed',
-      processedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    });
+    // Initialize or re-activate webhook record with 'received' state
+    let webhookRecord = existing;
+    if (!webhookRecord) {
+      webhookRecord = {
+        id: randomUUID(),
+        provider: 'paypal',
+        eventId,
+        eventType,
+        signatureVerified: true,
+        payload,
+        status: 'received',
+        createdAt: new Date().toISOString(),
+      };
+      await LedgerEngine.recordWebhookAsync(webhookRecord);
+    } else {
+      await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'received');
+    }
 
     const resource = payload.resource as Record<string, unknown> | undefined;
 
-    // 3. Payment Capture Completed: Reconcile amount, currency, and quote approval
-    if (eventType === 'PAYMENT.CAPTURE.COMPLETED' && resource) {
+    // 3. Payment Capture Completed: Strict payload verification, amount reconciliation, and quote approval
+    if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
+      if (!resource) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: 'Webhook payload invalid: missing resource object.', eventId },
+          { status: 400 }
+        );
+      }
+
+      // Verify provider capture status is explicitly COMPLETED
+      if (resource.status !== 'COMPLETED') {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: `Webhook capture status is "${resource.status}", expected "COMPLETED".`, eventId },
+          { status: 400 }
+        );
+      }
+
+      // Strict Amount Verification: Missing or non-numeric amount is rejected
+      const resourceAmount = (resource.amount as { value?: string; currency_code?: string }) || {};
+      if (
+        !resourceAmount.value ||
+        isNaN(parseFloat(resourceAmount.value)) ||
+        parseFloat(resourceAmount.value) <= 0
+      ) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: 'Webhook payload invalid: missing or non-positive capture amount.', eventId },
+          { status: 400 }
+        );
+      }
+
+      if (!resourceAmount.currency_code) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: 'Webhook payload invalid: missing capture currency.', eventId },
+          { status: 400 }
+        );
+      }
+
       const relatedIds = (resource.supplementary_data as Record<string, unknown> | undefined)?.related_ids as
         | Record<string, unknown>
         | undefined;
       const actualOrderId = (relatedIds?.order_id as string) || (resource.id as string);
 
-      if (actualOrderId) {
-        const payment = await LedgerEngine.getPaymentByOrderIdAsync(actualOrderId);
-        if (payment) {
-          // Reconcile amount and currency
-          const resourceAmount = (resource.amount as { value?: string; currency_code?: string }) || {};
-          const webhookCents = resourceAmount.value ? Math.round(parseFloat(resourceAmount.value) * 100) : null;
-          const webhookCurrency = resourceAmount.currency_code;
+      if (!actualOrderId) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: 'Webhook payload invalid: missing order reference in resource.', eventId },
+          { status: 400 }
+        );
+      }
 
-          if (
-            webhookCents !== null &&
-            (webhookCents !== payment.amountCents || (webhookCurrency && webhookCurrency !== payment.currency))
-          ) {
-            // Mismatch: DO NOT mark paid!
-            payment.status = 'failed';
-            payment.errorMessage = `Reconciliation mismatch: Webhook reported ${webhookCents} ${webhookCurrency}, but approved payment was ${payment.amountCents} ${payment.currency}.`;
-            payment.updatedAt = new Date().toISOString();
-            await LedgerEngine.savePaymentAttemptAsync(payment);
+      const payment = await LedgerEngine.getPaymentByOrderIdAsync(actualOrderId);
+      if (!payment) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          { error: `Payment record not found for order reference "${actualOrderId}".`, eventId },
+          { status: 404 }
+        );
+      }
 
-            await LedgerEngine.logAuditAsync({
-              businessId: payment.businessId,
-              entityType: 'payment',
-              entityId: payment.id,
-              actorId: 'paypal_webhook',
-              actorRole: 'external_gateway',
-              action: 'WEBHOOK_AMOUNT_MISMATCH',
-              payload: {
-                eventId,
-                expectedCents: payment.amountCents,
-                receivedCents: webhookCents,
-                expectedCurrency: payment.currency,
-                receivedCurrency: webhookCurrency,
-              },
-            });
+      // Reconcile exact minor unit cents and currency against approved payment
+      const webhookCents = Math.round(parseFloat(resourceAmount.value) * 100);
+      const webhookCurrency = resourceAmount.currency_code;
 
-            return NextResponse.json(
-              { error: 'Webhook amount reconciliation mismatch. Payment marked failed.', eventId },
-              { status: 400 }
-            );
-          }
+      if (webhookCents !== payment.amountCents || webhookCurrency !== payment.currency) {
+        payment.status = 'failed';
+        payment.errorMessage = `Reconciliation mismatch: Webhook reported ${webhookCents} ${webhookCurrency}, but approved payment was ${payment.amountCents} ${payment.currency}.`;
+        payment.updatedAt = new Date().toISOString();
+        await LedgerEngine.savePaymentAttemptAsync(payment);
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
 
-          // Verify underlying quote and approval
-          const approval = await LedgerEngine.getApprovalForQuoteAsync(payment.quoteId);
-          if (!approval || approval.decision !== 'approved') {
-            payment.status = 'failed';
-            payment.errorMessage = 'Reconciliation error: Underlying quote lacks verified approval.';
-            payment.updatedAt = new Date().toISOString();
-            await LedgerEngine.savePaymentAttemptAsync(payment);
+        await LedgerEngine.logAuditAsync({
+          businessId: payment.businessId,
+          entityType: 'payment',
+          entityId: payment.id,
+          actorId: 'paypal_webhook',
+          actorRole: 'external_gateway',
+          action: 'WEBHOOK_AMOUNT_MISMATCH',
+          payload: {
+            eventId,
+            expectedCents: payment.amountCents,
+            receivedCents: webhookCents,
+            expectedCurrency: payment.currency,
+            receivedCurrency: webhookCurrency,
+          },
+        });
 
-            return NextResponse.json(
-              { error: 'Cannot complete payment: Quote is not approved.', eventId },
-              { status: 400 }
-            );
-          }
+        return NextResponse.json(
+          { error: 'Webhook amount reconciliation mismatch. Payment marked failed.', eventId },
+          { status: 400 }
+        );
+      }
 
-          // Successfully reconciled and verified
-          if (payment.status !== 'captured') {
-            payment.status = 'captured';
-            payment.providerCaptureId = (resource.id as string) || payment.providerCaptureId;
-            payment.updatedAt = new Date().toISOString();
-            await LedgerEngine.savePaymentAttemptAsync(payment);
-          }
-        }
+      // Verify underlying quote and explicit approval
+      const approval = await LedgerEngine.getApprovalForQuoteAsync(payment.quoteId);
+      if (!approval || approval.decision !== 'approved') {
+        payment.status = 'failed';
+        payment.errorMessage = 'Reconciliation error: Underlying quote lacks verified approval.';
+        payment.updatedAt = new Date().toISOString();
+        await LedgerEngine.savePaymentAttemptAsync(payment);
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+
+        return NextResponse.json(
+          { error: 'Cannot complete payment: Quote is not approved.', eventId },
+          { status: 400 }
+        );
+      }
+
+      // Mark payment captured and transition request state
+      if (payment.status !== 'captured') {
+        payment.status = 'captured';
+        payment.providerCaptureId = (resource.id as string) || payment.providerCaptureId;
+        payment.updatedAt = new Date().toISOString();
+        await LedgerEngine.savePaymentAttemptAsync(payment);
       }
     }
 
@@ -155,6 +208,9 @@ export async function POST(req: Request) {
         }
       }
     }
+
+    // Mark webhook event fully processed only AFTER successful reconciliation
+    await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'processed');
 
     return NextResponse.json({
       success: true,

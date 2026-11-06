@@ -2,7 +2,7 @@
 
 All test suites are automated and executed locally and in CI using Vitest.
 
-## Executable Test Status (42/42 Passing)
+## Executable Test Status (45/45 Passing)
 
 | Category | Suite File | Tests | Status | Invariants Verified |
 | :--- | :--- | :---: | :---: | :--- |
@@ -11,10 +11,10 @@ All test suites are automated and executed locally and in CI using Vitest.
 | **Unit: PayPal Safety** | `tests/unit/paypal-safety.test.ts` | 6 | PASSED | Never simulating success on real API failures, placeholder credentials safety, capture error propagation, explicit simulated status indicators (`SIM-DEMO-`), capture idempotency, and strict webhook header validation. |
 | **Unit: Supabase Persistence** | `tests/unit/supabase.test.ts` | 4 | PASSED | Supabase client configuration, template placeholder safety, error throwing on database failures, and audit logging. |
 | **Adversarial: Guardrails** | `tests/adversarial/security-guardrails.test.ts` | 7 | PASSED | Quote tampering detection, unapproved supplier rejection, budget overage blocking, and quote expiry enforcement. |
-| **Adversarial: Auth & Webhook** | `tests/adversarial/authorization-and-persistence.test.ts` | 10 | PASSED | Anonymous/forged approver rejection (HTTP 401/403), requester self-approval blocking over $500, approver delegated threshold checks, quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), webhook event deduplication idempotency, and database persistence error surfacing. |
+| **Adversarial: Auth & Webhook** | `tests/adversarial/authorization-and-persistence.test.ts` | 13 | PASSED | Anonymous/forged approver rejection (HTTP 401/403), Supabase Auth session token extraction, database-backed membership/role lookup, requester self-approval blocking over $500, approver delegated threshold checks, HMAC secret-backed signature verification, quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), database-backed webhook deduplication idempotency, missing/non-positive capture amount rejection, failed webhook retryability, and database persistence error surfacing. |
 | **Integration: Procurement Flow**| `tests/integration/procurement-flow.test.ts` | 1 | PASSED | End-to-end deterministic lifecycle: Request creation → Server-side Quote calculation → Cryptographic Approval binding → PayPal order creation → Capture outcome → Ledger audit trail. |
 
-**Total: 42 passing tests across 7 test suites.**
+**Total: 45 passing tests across 7 test suites.**
 
 ---
 

@@ -14,6 +14,8 @@ import {
   Product,
   Quote,
   Supplier,
+  TeamMember,
+  UserRole,
   WebhookEventRecord,
 } from './types';
 
@@ -549,6 +551,98 @@ export async function fetchProductsFromSupabase(businessId: string): Promise<Pro
       currency: p.currency,
       inStock: p.in_stock,
     }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Authoritatively fetches a webhook event record from Supabase by provider eventId
+ */
+export async function fetchWebhookFromSupabase(eventId: string): Promise<WebhookEventRecord | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('webhook_events')
+      .select('*')
+      .eq('event_id', eventId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      provider: data.provider,
+      eventId: data.event_id,
+      eventType: data.event_type,
+      signatureVerified: data.signature_verified,
+      payload: data.payload,
+      status: data.status,
+      processedAt: data.processed_at,
+      createdAt: data.created_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Updates the state and processed timestamp of a webhook event in Supabase
+ */
+export async function updateWebhookStatusInSupabase(
+  id: string,
+  status: 'received' | 'processed' | 'failed' | 'duplicate',
+  processedAt?: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase is configured in environment but client failed to initialize.');
+  }
+
+  const { error } = await supabase
+    .from('webhook_events')
+    .update({
+      status,
+      processed_at: processedAt || (status === 'processed' ? new Date().toISOString() : null),
+    })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Failed to update webhook status in Supabase: ${error.message} (${error.code})`);
+  }
+  return true;
+}
+
+/**
+ * Authoritatively resolves user membership and role from Supabase
+ */
+export async function fetchMembershipFromSupabase(
+  userId: string,
+  businessId?: string
+): Promise<TeamMember | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    let query = supabase.from('memberships').select('*').eq('user_id', userId);
+    if (businessId) {
+      query = query.eq('business_id', businessId);
+    }
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      businessId: data.business_id,
+      userId: data.user_id,
+      userName: data.user_name,
+      userEmail: data.user_email,
+      role: data.role as UserRole,
+      approvalLimitCents: Number(data.approval_limit_cents),
+    };
   } catch {
     return null;
   }

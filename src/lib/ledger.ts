@@ -11,6 +11,8 @@ import {
   fetchPaymentByOrderIdFromSupabase,
   fetchQuoteFromSupabase,
   fetchRequestFromSupabase,
+  fetchWebhookFromSupabase,
+  updateWebhookStatusInSupabase,
   isSupabaseConfigured,
   persistApprovalToSupabase,
   persistAuditToSupabase,
@@ -570,6 +572,28 @@ export class LedgerEngine {
         status: rec.status,
       },
     });
+  }
+
+  static async getWebhookEventAsync(eventId: string): Promise<WebhookEventRecord | undefined> {
+    if (isSupabaseConfigured()) {
+      const dbWebhook = await fetchWebhookFromSupabase(eventId);
+      if (dbWebhook) return dbWebhook;
+    }
+    return getStore().webhooks.get(eventId);
+  }
+
+  static async updateWebhookStatusAsync(
+    rec: WebhookEventRecord,
+    status: 'received' | 'processed' | 'failed' | 'duplicate'
+  ): Promise<void> {
+    rec.status = status;
+    if (status === 'processed') {
+      rec.processedAt = new Date().toISOString();
+    }
+    if (isSupabaseConfigured()) {
+      await updateWebhookStatusInSupabase(rec.id, status, rec.processedAt);
+    }
+    getStore().webhooks.set(rec.eventId, rec);
   }
 
   static getWebhookEvent(eventId: string): WebhookEventRecord | undefined {

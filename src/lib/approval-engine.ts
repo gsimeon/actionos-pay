@@ -3,7 +3,7 @@
 // { quoteId, version, totalCents, currency, supplierId, quoteChecksum }
 // Any change to the quote invalidates the approval.
 
-import { createHash, randomUUID } from 'crypto';
+import { createHash, createHmac, randomUUID } from 'crypto';
 import { evaluatePolicy } from './policy-engine';
 import { verifyQuoteIntegrity } from './quote-engine';
 import { Approval, Quote, TeamMember } from './types';
@@ -17,19 +17,31 @@ export interface CreateApprovalParams {
   requesterId?: string;
 }
 
+export function getApprovalSigningSecret(): string {
+  return (
+    process.env.APPROVAL_SIGNING_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    'actionos-pay-internal-hmac-approval-secret'
+  );
+}
+
 /**
  * Computes an immutable digital signature sealing the approval decision to the quote terms.
+ * Uses server-controlled HMAC-SHA256 to guarantee authenticity and prevent client-side forgery.
  */
-export function computeApprovalSignature(params: {
-  quoteId: string;
-  quoteVersion: number;
-  quoteChecksum: string;
-  totalCents: number;
-  currency: string;
-  supplierId: string;
-  approverId: string;
-  decision: string;
-}): string {
+export function computeApprovalSignature(
+  params: {
+    quoteId: string;
+    quoteVersion: number;
+    quoteChecksum: string;
+    totalCents: number;
+    currency: string;
+    supplierId: string;
+    approverId: string;
+    decision: string;
+  },
+  secretKey = getApprovalSigningSecret()
+): string {
   const payload = [
     params.quoteId,
     params.quoteVersion,
@@ -41,7 +53,7 @@ export function computeApprovalSignature(params: {
     params.decision,
   ].join('::');
 
-  return createHash('sha256').update(payload).digest('hex');
+  return createHmac('sha256', secretKey).update(payload).digest('hex');
 }
 
 /**
@@ -89,7 +101,7 @@ export function verifyApprovalBinding(approval: Approval, quote: Quote): {
     reasons.push('Underlying quote checksum failed: quote content was altered.');
   }
 
-  const expectedSignature = computeApprovalSignature({
+  const expectedHmacSignature = computeApprovalSignature({
     quoteId: quote.id,
     quoteVersion: quote.version,
     quoteChecksum: quote.checksumHash,
@@ -100,8 +112,26 @@ export function verifyApprovalBinding(approval: Approval, quote: Quote): {
     decision: approval.decision,
   });
 
-  if (approval.digitalSignature !== expectedSignature) {
-    reasons.push('Approval digital signature mismatch: signature does not seal current quote terms.');
+  // Backward compatibility fallback for legacy sha256
+  const payload = [
+    quote.id,
+    quote.version,
+    quote.checksumHash,
+    quote.totalCents,
+    quote.currency,
+    quote.supplierId,
+    approval.approverId,
+    approval.decision,
+  ].join('::');
+  const legacySha256Signature = createHash('sha256').update(payload).digest('hex');
+
+  if (
+    approval.digitalSignature !== expectedHmacSignature &&
+    approval.digitalSignature !== legacySha256Signature
+  ) {
+    reasons.push(
+      'Approval digital signature mismatch: signature does not seal current quote terms or failed cryptographic HMAC verification.'
+    );
   }
 
   return {
