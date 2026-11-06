@@ -61,6 +61,7 @@ export default function Home() {
   const [policyResult, setPolicyResult] = useState<PolicyEvaluationResult | null>(null);
   const [currentApproval, setCurrentApproval] = useState<Approval | null>(null);
   const [paymentAttempt, setPaymentAttempt] = useState<PaymentAttempt | null>(null);
+  const [approveUrl, setApproveUrl] = useState<string | null>(null);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   const [approvalNote, setApprovalNote] = useState('');
@@ -119,6 +120,7 @@ export default function Home() {
     setPolicyResult(null);
     setCurrentApproval(null);
     setPaymentAttempt(null);
+    setApproveUrl(null);
 
     try {
       const budgetCents = parseInt(budgetCap, 10) * 100 || 500000;
@@ -229,6 +231,7 @@ export default function Home() {
       const data = await res.json();
       if (res.ok) {
         setPaymentAttempt(data.paymentAttempt);
+        setApproveUrl(data.approveUrl || null);
         await refreshLedger();
       } else {
         alert(`PayPal Order Error: ${data.error}`);
@@ -255,6 +258,7 @@ export default function Home() {
       const data = await res.json();
       if (res.ok) {
         setPaymentAttempt(data.paymentAttempt);
+        setApproveUrl(data.approveUrl || null);
         await refreshLedger();
       } else {
         alert(`PayPal Capture Error: ${data.error}`);
@@ -288,6 +292,7 @@ export default function Home() {
     setPolicyResult(null);
     setCurrentApproval(null);
     setPaymentAttempt(null);
+    setApproveUrl(null);
     setAttackResult(null);
     await refreshLedger();
   };
@@ -1145,10 +1150,37 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {approveUrl && (
+                      <div className="rounded-2xl border border-blue-500/30 bg-blue-950/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-blue-200 flex items-center gap-2">
+                            <ExternalLink className="h-4 w-4 text-blue-400" />
+                            Buyer Authorization Required
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Open the PayPal Sandbox window to authorize payment using your sandbox buyer account before capturing.
+                          </p>
+                        </div>
+                        <a
+                          href={approveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-xl bg-[#0070ba] hover:bg-[#005ea6] px-4 py-2.5 text-xs font-semibold text-white transition flex items-center gap-1.5 shrink-0 shadow-lg shadow-blue-900/30"
+                        >
+                          <span>Authorize on PayPal Sandbox</span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    )}
+
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl border border-white/10 bg-black/40">
                       <div>
-                        <p className="text-xs font-semibold text-white">Sandbox Checkout Simulated / Connected</p>
-                        <p className="text-[11px] text-slate-400">Click capture to simulate buyer checkout completion and server-side capture.</p>
+                        <p className="text-xs font-semibold text-white">Capture Payment</p>
+                        <p className="text-[11px] text-slate-400">
+                          {approveUrl
+                            ? 'After authorizing on PayPal Sandbox, click below to finalize and record in the ledger.'
+                            : 'Click capture to finalize order and record authoritative capture in the ledger.'}
+                        </p>
                       </div>
 
                       <button
