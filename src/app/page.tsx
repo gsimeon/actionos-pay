@@ -261,7 +261,17 @@ export default function Home() {
         setApproveUrl(data.approveUrl || null);
         await refreshLedger();
       } else {
-        alert(`PayPal Capture Error: ${data.error}`);
+        if (data.paymentAttempt) {
+          setPaymentAttempt(data.paymentAttempt);
+        } else {
+          setPaymentAttempt((prev) =>
+            prev ? { ...prev, status: 'failed', errorMessage: data.error } : null
+          );
+        }
+        await refreshLedger();
+        if (!data.error?.includes('ORDER_NOT_APPROVED')) {
+          alert(`PayPal Capture Error: ${data.error}`);
+        }
       }
     } catch (err: unknown) {
       alert(`Error capturing payment: ${err instanceof Error ? err.message : String(err)}`);
@@ -1098,10 +1108,16 @@ export default function Home() {
                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
                         : paymentAttempt?.status === 'created'
                         ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                        : paymentAttempt?.status === 'failed'
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
                         : 'border-white/10 text-slate-400'
                     }`}
                   >
-                    STATUS: {paymentAttempt?.status?.toUpperCase() || 'READY TO INITIATE'}
+                    STATUS:{' '}
+                    {paymentAttempt?.status === 'failed' &&
+                    paymentAttempt.errorMessage?.includes('ORDER_NOT_APPROVED')
+                      ? 'BUYER AUTHORIZATION REQUIRED'
+                      : paymentAttempt?.status?.toUpperCase() || 'READY TO INITIATE'}
                   </span>
                 </div>
 
@@ -1133,7 +1149,7 @@ export default function Home() {
                       )}
                     </button>
                   </div>
-                ) : paymentAttempt.status === 'created' ? (
+                ) : paymentAttempt.status === 'created' || paymentAttempt.status === 'failed' ? (
                   <div className="mt-5 space-y-4">
                     <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/20 p-4 text-xs space-y-2">
                       <div className="flex justify-between">
@@ -1150,15 +1166,44 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {/* Authorization Pending Notice */}
+                    {paymentAttempt.status === 'failed' &&
+                      paymentAttempt.errorMessage?.includes('ORDER_NOT_APPROVED') && (
+                        <div className="rounded-2xl border border-amber-500/30 bg-amber-950/30 p-4 text-xs space-y-2">
+                          <div className="flex items-center gap-2 font-semibold text-amber-300">
+                            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                            <span>Buyer Authorization Required in PayPal Sandbox</span>
+                          </div>
+                          <p className="text-slate-300 text-[11px] leading-relaxed">
+                            PayPal returned <code className="text-amber-200">ORDER_NOT_APPROVED</code>:
+                            The buyer has not authorized the order on PayPal Sandbox yet.
+                          </p>
+                          <ol className="list-decimal pl-5 text-[11px] text-slate-400 space-y-1 mt-1">
+                            <li>
+                              Click the blue <strong className="text-white">"Authorize on PayPal Sandbox"</strong> button below to open PayPal checkout.
+                            </li>
+                            <li>
+                              Log in using your Sandbox Personal buyer account (from PayPal Developer Dashboard &rarr; Testing Tools &rarr; Sandbox Accounts).
+                            </li>
+                            <li>
+                              Click <strong className="text-white">"Agree & Pay"</strong> or <strong className="text-white">"Complete Purchase"</strong> on PayPal.
+                            </li>
+                            <li>
+                              Return to this tab and click <strong className="text-emerald-400">"Retry Server-Side Capture"</strong>.
+                            </li>
+                          </ol>
+                        </div>
+                      )}
+
                     {approveUrl && (
                       <div className="rounded-2xl border border-blue-500/30 bg-blue-950/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold text-blue-200 flex items-center gap-2">
                             <ExternalLink className="h-4 w-4 text-blue-400" />
-                            Buyer Authorization Required
+                            Step 5A: Authorize Order on PayPal
                           </p>
                           <p className="text-[11px] text-slate-400 mt-0.5">
-                            Open the PayPal Sandbox window to authorize payment using your sandbox buyer account before capturing.
+                            Open PayPal Sandbox checkout to approve payment using your sandbox buyer account.
                           </p>
                         </div>
                         <a
@@ -1175,7 +1220,7 @@ export default function Home() {
 
                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl border border-white/10 bg-black/40">
                       <div>
-                        <p className="text-xs font-semibold text-white">Capture Payment</p>
+                        <p className="text-xs font-semibold text-white">Step 5B: Server-Side Capture</p>
                         <p className="text-[11px] text-slate-400">
                           {approveUrl
                             ? 'After authorizing on PayPal Sandbox, click below to finalize and record in the ledger.'
@@ -1196,7 +1241,9 @@ export default function Home() {
                         ) : (
                           <>
                             <CheckCircle2 className="h-4 w-4" />
-                            Complete Server-Side Capture
+                            {paymentAttempt.status === 'failed'
+                              ? 'Retry Server-Side Capture'
+                              : 'Complete Server-Side Capture'}
                           </>
                         )}
                       </button>
