@@ -22,5 +22,33 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Execute Recovery Worker Suite
+      - name: Trigger Operational Recovery Endpoint
+        if: env.WEBHOOK_RECOVERY_URL != ''
+        env:
+          WEBHOOK_RECOVERY_URL: ${{ secrets.WEBHOOK_RECOVERY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Triggering operational webhook recovery worker at $WEBHOOK_RECOVERY_URL..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${WEBHOOK_RECOVERY_URL}/api/paypal/webhook/recover" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{"batchSize": 25, "leaseSeconds": 60, "maxRetries": 5}')
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          echo "Worker Response (HTTP $HTTP_CODE): $BODY"
+          
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Recovery worker failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          EXHAUSTED=$(echo "$BODY" | grep -o '"deadLetteredCount":[0-9]*' | cut -d: -f2 || echo "0")
+          FAILED=$(echo "$BODY" | grep -o '"failedCount":[0-9]*' | cut -d: -f2 || echo "0")
+          
+          if [ "$EXHAUSTED" -gt 0 ]; then
+            echo "::warning::Alert: $EXHAUSTED webhook events reached maximum retries and were dead-lettered."
+          fi
+
+      - name: Execute Recovery Worker Suite (Automated In-Process Verification)
         run: npx vitest run tests/adversarial/authorization-and-persistence.test.ts -t "executes durable recovery worker"
