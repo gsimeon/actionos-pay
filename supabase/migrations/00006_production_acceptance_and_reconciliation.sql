@@ -52,7 +52,10 @@ DECLARE
 BEGIN
   -- 0. Identity Binding & Service-Role Boundary:
   -- If invoked directly under 'authenticated' role, auth.uid() is mandatory and must match submitted approver_id
-  IF current_user = 'authenticated' OR COALESCE(current_setting('request.jwt.claim.role', true), '') = 'authenticated' THEN
+  IF current_user = 'authenticated'
+     OR session_user = 'authenticated'
+     OR COALESCE(current_setting('role', true), '') = 'authenticated'
+     OR COALESCE(current_setting('request.jwt.claim.role', true), '') = 'authenticated' THEN
     IF v_session_user_id IS NULL THEN
       RAISE EXCEPTION 'Authorization failure: Direct execution under "authenticated" role requires an active auth.uid() session';
     END IF;
@@ -273,7 +276,10 @@ DECLARE
   v_rows_affected INT;
 BEGIN
   -- Strict Engine Privilege Lockdown
-  IF current_user IN ('anon', 'authenticated') OR COALESCE(current_setting('request.jwt.claim.role', true), '') IN ('anon', 'authenticated') THEN
+  IF current_user IN ('anon', 'authenticated')
+     OR session_user IN ('anon', 'authenticated')
+     OR COALESCE(current_setting('role', true), '') IN ('anon', 'authenticated')
+     OR COALESCE(current_setting('request.jwt.claim.role', true), '') IN ('anon', 'authenticated') THEN
     RAISE EXCEPTION 'Authorization failure: Function reconcile_payment_capture_atomic can only be executed by service_role';
   END IF;
 
@@ -504,7 +510,10 @@ DECLARE
   v_existing webhook_events%ROWTYPE;
 BEGIN
   -- Strict Engine Privilege Lockdown
-  IF current_user IN ('anon', 'authenticated') OR COALESCE(current_setting('request.jwt.claim.role', true), '') IN ('anon', 'authenticated') THEN
+  IF current_user IN ('anon', 'authenticated')
+     OR session_user IN ('anon', 'authenticated')
+     OR COALESCE(current_setting('role', true), '') IN ('anon', 'authenticated')
+     OR COALESCE(current_setting('request.jwt.claim.role', true), '') IN ('anon', 'authenticated') THEN
     RAISE EXCEPTION 'Authorization failure: Function claim_webhook_event can only be executed by service_role';
   END IF;
 

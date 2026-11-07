@@ -280,7 +280,7 @@ BEGIN
       'approved'
     );
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%Authenticated role requires an active auth.uid() session%' THEN
+    IF SQLERRM ILIKE '%requires an active auth.uid() session%' THEN
       v_caught := true;
     END IF;
   END;
@@ -399,7 +399,7 @@ BEGIN
       'approved'
     );
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%Tenant boundary violation%' THEN
+    IF SQLERRM ILIKE '%Tenant boundary violation%' THEN
       v_caught := true;
     END IF;
   END;
