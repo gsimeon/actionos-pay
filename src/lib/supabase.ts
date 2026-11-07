@@ -146,6 +146,7 @@ export async function persistRequestToSupabase(req: ProcurementRequest): Promise
 
 /**
  * Persists a quote and its items to Supabase atomically.
+ * Uses PostgreSQL RPC create_quote_atomic with fallback.
  * Throws on failure when Supabase is configured.
  */
 export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
@@ -155,6 +156,49 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
     throw new Error('Supabase is configured in environment but client failed to initialize.');
   }
 
+  // 1. Try atomic PostgreSQL RPC create_quote_atomic
+  try {
+    const quotePayload = {
+      id: quote.id,
+      request_id: quote.requestId,
+      business_id: quote.businessId,
+      supplier_id: quote.supplierId,
+      supplier_name: quote.supplierName,
+      version: quote.version,
+      subtotal_cents: quote.subtotalCents,
+      tax_cents: quote.taxCents,
+      shipping_cents: quote.shippingCents,
+      total_cents: quote.totalCents,
+      currency: quote.currency,
+      checksum_hash: quote.checksumHash,
+      status: quote.status,
+      expires_at: quote.expiresAt,
+      created_at: quote.createdAt,
+    };
+
+    const itemsPayload = (quote.items || []).map((i) => ({
+      id: i.id,
+      product_id: i.productId || null,
+      item_name: i.itemName,
+      sku: i.sku || null,
+      quantity: i.quantity,
+      unit_price_cents: i.unitPriceCents,
+      total_cents: i.totalCents,
+    }));
+
+    const { error: rpcErr } = await supabase.rpc('create_quote_atomic', {
+      p_quote: quotePayload,
+      p_items: itemsPayload,
+    });
+
+    if (!rpcErr) {
+      return true;
+    }
+  } catch {
+    // Fallback if RPC is not deployed in database
+  }
+
+  // Fallback sequential execution with manual rollback
   const { error: quoteErr } = await supabase.from('quotes').upsert({
     id: quote.id,
     request_id: quote.requestId,
@@ -660,6 +704,7 @@ export interface WebhookClaimResult {
 
 /**
  * Atomically claims a webhook event in Supabase to eliminate race conditions between concurrent deliveries.
+ * Leverages PostgreSQL RPC claim_webhook_event with 60-second lease expiry & automatic stale claim recovery.
  */
 export async function claimWebhookEventInSupabase(
   eventRecord: WebhookEventRecord
@@ -672,7 +717,46 @@ export async function claimWebhookEventInSupabase(
     throw new Error('Supabase is configured in environment but client failed to initialize.');
   }
 
-  // 1. Check existing record
+  // 1. Try atomic PostgreSQL RPC claim_webhook_event
+  try {
+    const { data, error: rpcErr } = await supabase.rpc('claim_webhook_event', {
+      p_id: eventRecord.id,
+      p_provider: eventRecord.provider,
+      p_event_id: eventRecord.eventId,
+      p_event_type: eventRecord.eventType,
+      p_payload: eventRecord.payload,
+      p_signature_verified: eventRecord.signatureVerified,
+      p_lease_seconds: 60,
+    });
+
+    if (!rpcErr && Array.isArray(data) && data.length > 0) {
+      const row = data[0];
+      const eventRow = row.event_row || row;
+      const claimStatus = row.claim_status === 'recovered_lease' ? 'retryable' : row.claim_status;
+      return {
+        claimed: Boolean(row.claimed),
+        status: claimStatus as 'received' | 'duplicate' | 'in_progress' | 'retryable',
+        record: eventRow
+          ? {
+              id: eventRow.id,
+              provider: eventRow.provider,
+              eventId: eventRow.event_id,
+              eventType: eventRow.event_type,
+              signatureVerified: eventRow.signature_verified,
+              payload: eventRow.payload,
+              status: eventRow.status,
+              claimLeaseExpiresAt: eventRow.claim_lease_expires_at,
+              processedAt: eventRow.processed_at,
+              createdAt: eventRow.created_at,
+            }
+          : null,
+      };
+    }
+  } catch {
+    // If RPC is unavailable in current database, proceed to client fallback below
+  }
+
+  // 2. Client-side fallback with 60s lease TTL & abandoned worker recovery
   const { data: existing, error: selectErr } = await supabase
     .from('webhook_events')
     .select('*')
@@ -682,6 +766,9 @@ export async function claimWebhookEventInSupabase(
   if (selectErr) {
     throw new Error(`Failed to query webhook event: ${selectErr.message}`);
   }
+
+  const now = Date.now();
+  const leaseExpiresAt = new Date(now + 60000).toISOString();
 
   if (existing) {
     if (existing.status === 'processed' || existing.status === 'duplicate') {
@@ -696,6 +783,7 @@ export async function claimWebhookEventInSupabase(
           signatureVerified: existing.signature_verified,
           payload: existing.payload,
           status: existing.status,
+          claimLeaseExpiresAt: existing.claim_lease_expires_at,
           processedAt: existing.processed_at,
           createdAt: existing.created_at,
         },
@@ -703,21 +791,57 @@ export async function claimWebhookEventInSupabase(
     }
 
     if (existing.status === 'received') {
-      return {
-        claimed: false,
-        status: 'in_progress',
-        record: {
-          id: existing.id,
-          provider: existing.provider,
-          eventId: existing.event_id,
-          eventType: existing.event_type,
-          signatureVerified: existing.signature_verified,
-          payload: existing.payload,
-          status: existing.status,
-          processedAt: existing.processed_at,
-          createdAt: existing.created_at,
-        },
-      };
+      // Check lease expiry: if lease is still active, in progress
+      if (existing.claim_lease_expires_at && new Date(existing.claim_lease_expires_at).getTime() > now) {
+        return {
+          claimed: false,
+          status: 'in_progress',
+          record: {
+            id: existing.id,
+            provider: existing.provider,
+            eventId: existing.event_id,
+            eventType: existing.event_type,
+            signatureVerified: existing.signature_verified,
+            payload: existing.payload,
+            status: existing.status,
+            claimLeaseExpiresAt: existing.claim_lease_expires_at,
+            processedAt: existing.processed_at,
+            createdAt: existing.created_at,
+          },
+        };
+      } else {
+        // Stale claim lease expired (worker crashed or timed out). Recover claim safely!
+        const { data: recovered, error: recoverErr } = await supabase
+          .from('webhook_events')
+          .update({
+            claim_lease_expires_at: leaseExpiresAt,
+            payload: eventRecord.payload,
+          })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (recoverErr || !recovered) {
+          return { claimed: false, status: 'duplicate', record: null };
+        }
+
+        return {
+          claimed: true,
+          status: 'retryable',
+          record: {
+            id: recovered.id,
+            provider: recovered.provider,
+            eventId: recovered.event_id,
+            eventType: recovered.event_type,
+            signatureVerified: recovered.signature_verified,
+            payload: recovered.payload,
+            status: recovered.status,
+            claimLeaseExpiresAt: recovered.claim_lease_expires_at,
+            processedAt: recovered.processed_at,
+            createdAt: recovered.created_at,
+          },
+        };
+      }
     }
 
     if (existing.status === 'failed') {
@@ -727,6 +851,7 @@ export async function claimWebhookEventInSupabase(
         .update({
           status: 'received',
           processed_at: null,
+          claim_lease_expires_at: leaseExpiresAt,
           payload: eventRecord.payload,
         })
         .eq('id', existing.id)
@@ -749,6 +874,7 @@ export async function claimWebhookEventInSupabase(
           signatureVerified: updated.signature_verified,
           payload: updated.payload,
           status: updated.status,
+          claimLeaseExpiresAt: updated.claim_lease_expires_at,
           processedAt: updated.processed_at,
           createdAt: updated.created_at,
         },
@@ -756,7 +882,7 @@ export async function claimWebhookEventInSupabase(
     }
   }
 
-  // 2. Insert new webhook event with status 'received'
+  // 3. Insert new webhook event with initial 60s lease
   const { data: inserted, error: insertErr } = await supabase
     .from('webhook_events')
     .insert({
@@ -767,6 +893,7 @@ export async function claimWebhookEventInSupabase(
       signature_verified: eventRecord.signatureVerified,
       payload: eventRecord.payload,
       status: 'received',
+      claim_lease_expires_at: leaseExpiresAt,
       created_at: eventRecord.createdAt,
     })
     .select()
@@ -795,6 +922,7 @@ export async function claimWebhookEventInSupabase(
       signatureVerified: inserted.signature_verified,
       payload: inserted.payload,
       status: inserted.status,
+      claimLeaseExpiresAt: inserted.claim_lease_expires_at,
       processedAt: inserted.processed_at,
       createdAt: inserted.created_at,
     },
@@ -829,6 +957,7 @@ export async function updateRequestStatusInSupabase(
 /**
  * Reconciles captured payment, transitions request state to fulfilled,
  * marks webhook event processed, and logs immutable audit trail.
+ * Uses atomic PostgreSQL RPC reconcile_payment_capture_atomic with fallback.
  */
 export async function reconcilePaymentCaptureInSupabase(params: {
   payment: PaymentAttempt;
@@ -844,7 +973,28 @@ export async function reconcilePaymentCaptureInSupabase(params: {
 
   const { payment, webhookRecord, quote, providerCaptureId } = params;
 
-  // 1. Update Payment Record to captured
+  // 1. Try atomic PostgreSQL RPC reconcile_payment_capture_atomic
+  try {
+    const { error: rpcErr } = await supabase.rpc('reconcile_payment_capture_atomic', {
+      p_payment_id: payment.id,
+      p_provider_capture_id: providerCaptureId,
+      p_webhook_id: webhookRecord.id,
+      p_quote_id: quote.id,
+      p_request_id: quote.requestId || null,
+      p_business_id: payment.businessId,
+      p_amount_cents: payment.amountCents,
+      p_currency: payment.currency,
+      p_event_id: webhookRecord.eventId,
+    });
+
+    if (!rpcErr) {
+      return;
+    }
+  } catch {
+    // If RPC is unavailable in current database, proceed to fallback
+  }
+
+  // 2. Fallback sequential persistence
   await persistPaymentToSupabase({
     ...payment,
     status: 'captured',
@@ -852,15 +1002,12 @@ export async function reconcilePaymentCaptureInSupabase(params: {
     updatedAt: new Date().toISOString(),
   });
 
-  // 2. Update Webhook Event Record to processed
   await updateWebhookStatusInSupabase(webhookRecord.id, 'processed', new Date().toISOString());
 
-  // 3. Transition Procurement Request to fulfilled
   if (quote.requestId) {
     await updateRequestStatusInSupabase(quote.requestId, 'fulfilled');
   }
 
-  // 4. Log Immutable Audit Record
   await persistAuditToSupabase({
     id: randomUUID(),
     businessId: payment.businessId,

@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { LedgerEngine } from '@/lib/ledger';
 import { capturePayPalOrder } from '@/lib/paypal-service';
+import { authorizeRequest } from '@/lib/auth-guard';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { orderId } = body as { orderId: string };
+    const { orderId, callerUserId } = body as { orderId: string; callerUserId?: string };
 
     if (!orderId) {
       return NextResponse.json({ error: 'orderId is required.' }, { status: 400 });
@@ -18,6 +19,17 @@ export async function POST(req: Request) {
         { error: `Payment attempt not found for orderId "${orderId}".` },
         { status: 404 }
       );
+    }
+
+    // Authorize caller against payment's business organization
+    const auth = await authorizeRequest(
+      req,
+      paymentAttempt.businessId,
+      ['requester', 'approver', 'admin'],
+      callerUserId
+    );
+    if (!auth.authorized) {
+      return auth.errorResponse!;
     }
 
     // Idempotency check: If already successfully captured, return completed state without recharging

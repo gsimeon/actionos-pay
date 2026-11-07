@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { POST as approveRoute } from '@/app/api/procurement/approve/route';
 import { POST as webhookRoute } from '@/app/api/paypal/webhook/route';
 import { POST as createOrderRoute } from '@/app/api/paypal/create-order/route';
+import { POST as captureOrderRoute } from '@/app/api/paypal/capture-order/route';
 import { LedgerEngine } from '@/lib/ledger';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
 import {
@@ -11,7 +12,7 @@ import {
   verifyApprovalBinding,
   safeTimingCompareHex,
 } from '@/lib/approval-engine';
-import { Quote, ProcurementRequest, PaymentAttempt, Approval } from '@/lib/types';
+import { Quote, ProcurementRequest, PaymentAttempt, Approval, WebhookEventRecord } from '@/lib/types';
 import { persistRequestToSupabase, resetSupabaseClientForTesting } from '@/lib/supabase';
 import { DEMO_MEMBERS } from '@/lib/catalog';
 
@@ -270,6 +271,64 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       const json = await res.json();
       expect(json.error).toContain('exceeds approver\'s delegated spending threshold');
     });
+
+    it('requires Bearer token on /api/paypal/create-order when Supabase is configured and rejects missing token with 401', async () => {
+      const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      try {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://wycykgykpbtschrydtld.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key-32-chars-minimum-here';
+        resetSupabaseClientForTesting();
+
+        const req = new Request('http://localhost/api/paypal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quoteId: validQuote.id }),
+        });
+
+        const res = await createOrderRoute(req);
+        expect(res.status).toBe(401);
+        const json = await res.json();
+        expect(json.error).toContain('Bearer session token is required when Supabase is configured');
+      } finally {
+        if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        resetSupabaseClientForTesting();
+      }
+    });
+
+    it('rejects cross-tenant capture request with 403', async () => {
+      const payment: PaymentAttempt = {
+        id: 'pay-cross-tenant-1',
+        quoteId: validQuote.id,
+        businessId: '99999999-9999-4000-8000-999999999999', // Different tenant!
+        provider: 'paypal',
+        providerOrderId: 'ORD-PP-CROSS-1',
+        amountCents: 109500,
+        currency: 'USD',
+        status: 'created',
+        idempotencyKey: 'idem-cross-1',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await LedgerEngine.savePaymentAttemptAsync(payment);
+
+      const req = new Request('http://localhost/api/paypal/capture-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': requesterMember.userId, // Belongs to testBusinessId, not 99999999...
+        },
+        body: JSON.stringify({ orderId: 'ORD-PP-CROSS-1' }),
+      });
+
+      const res = await captureOrderRoute(req);
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error).toContain('does not belong to business');
+    });
   });
 
   describe('Quote Integrity & Tamper Resistance', () => {
@@ -341,6 +400,20 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       } finally {
         if (oldSecret) process.env.APPROVAL_SIGNING_SECRET = oldSecret;
         if (oldRoleKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldRoleKey;
+      }
+    });
+
+    it('strictly forbids SUPABASE_SERVICE_ROLE_KEY from substituting for APPROVAL_SIGNING_SECRET', () => {
+      const oldSecret = process.env.APPROVAL_SIGNING_SECRET;
+      const oldRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      try {
+        delete process.env.APPROVAL_SIGNING_SECRET;
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'super-secret-service-role-key-that-is-long-enough-for-anything-12345';
+        expect(() => getApprovalSigningSecret()).toThrow('Shared infrastructure keys (such as SUPABASE_SERVICE_ROLE_KEY)');
+      } finally {
+        if (oldSecret) process.env.APPROVAL_SIGNING_SECRET = oldSecret;
+        if (oldRoleKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldRoleKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
       }
     });
 
@@ -768,6 +841,154 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
 
       const webhookRec = await LedgerEngine.getWebhookEventAsync('WH-EVT-ATOMIC-GOOD-1');
       expect(webhookRec?.status).toBe('processed');
+    });
+
+    it('recovers abandoned webhook claim when worker lease has expired (stale claim recovery)', async () => {
+      const eventId = 'WH-EVT-STALE-LEASE-1';
+      const initialRecord: WebhookEventRecord = {
+        id: 'rec-stale-1',
+        provider: 'paypal',
+        eventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: eventId },
+        status: 'received',
+        claimLeaseExpiresAt: new Date(Date.now() - 5000).toISOString(), // Expired 5 seconds ago!
+        createdAt: new Date(Date.now() - 65000).toISOString(),
+      };
+
+      // Seed in-memory ledger and explicitly set lease in the past to simulate abandoned worker
+      await LedgerEngine.claimWebhookEventAsync(initialRecord);
+      const stored = await LedgerEngine.getWebhookEventAsync(eventId);
+      if (stored) {
+        stored.claimLeaseExpiresAt = new Date(Date.now() - 5000).toISOString();
+      }
+
+      // Now a retry/subsequent claim arrives:
+      const retryRecord: WebhookEventRecord = {
+        id: 'rec-stale-2',
+        provider: 'paypal',
+        eventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: eventId, retried: true },
+        status: 'received',
+        createdAt: new Date().toISOString(),
+      };
+
+      const result = await LedgerEngine.claimWebhookEventAsync(retryRecord);
+      expect(result.claimed).toBe(true);
+      expect(result.status).toBe('retryable');
+    });
+
+    it('rejects concurrent claim while worker lease is actively held', async () => {
+      const eventId = 'WH-EVT-ACTIVE-LEASE-1';
+      const initialRecord: WebhookEventRecord = {
+        id: 'rec-active-1',
+        provider: 'paypal',
+        eventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: eventId },
+        status: 'received',
+        claimLeaseExpiresAt: new Date(Date.now() + 45000).toISOString(), // Still active for 45s
+        createdAt: new Date().toISOString(),
+      };
+
+      await LedgerEngine.claimWebhookEventAsync(initialRecord);
+
+      const concurrentRecord: WebhookEventRecord = {
+        id: 'rec-active-2',
+        provider: 'paypal',
+        eventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: eventId },
+        status: 'received',
+        createdAt: new Date().toISOString(),
+      };
+
+      const result = await LedgerEngine.claimWebhookEventAsync(concurrentRecord);
+      expect(result.claimed).toBe(false);
+      expect(result.status).toBe('in_progress');
+    });
+
+    it('rejects webhook payload missing event id (payload.id)', async () => {
+      const webhookPayload = {
+        // Missing id
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: { id: 'CAP-123' },
+      };
+
+      const req = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      const res = await webhookRoute(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('missing event id (payload.id)');
+    });
+
+    it('rejects capture webhook missing order reference in supplementary_data.related_ids.order_id', async () => {
+      const webhookPayload = {
+        id: 'WH-EVT-MISSING-ORDER-ID',
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAP-EVT-NO-ORDER-REF',
+          status: 'COMPLETED',
+          amount: { value: '1095.00', currency_code: 'USD' },
+          // Missing supplementary_data.related_ids.order_id
+        },
+      };
+
+      const req = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      const res = await webhookRoute(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('missing order reference in resource.supplementary_data.related_ids.order_id');
+    });
+
+    it('rejects simulation and mock signatures in strict production mode', async () => {
+      const oldEnv = process.env.PAYPAL_ENV;
+      try {
+        process.env.PAYPAL_ENV = 'production';
+
+        const webhookPayload = {
+          id: 'WH-EVT-PROD-REJECT',
+          event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        };
+
+        const req = new Request('http://localhost/api/paypal/webhook', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-mock-sandbox-signature': 'mock-sig-12345',
+          },
+          body: JSON.stringify(webhookPayload),
+        });
+
+        const res = await webhookRoute(req);
+        expect(res.status).toBe(400);
+        const json = await res.json();
+        expect(json.error).toContain('Invalid webhook signature');
+      } finally {
+        if (oldEnv) process.env.PAYPAL_ENV = oldEnv;
+        else delete process.env.PAYPAL_ENV;
+      }
     });
   });
 

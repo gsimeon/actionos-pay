@@ -3,11 +3,12 @@ import { verifyApprovalBinding } from '@/lib/approval-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { createPayPalOrder } from '@/lib/paypal-service';
 import { verifyQuoteIntegrity } from '@/lib/quote-engine';
+import { authorizeRequest } from '@/lib/auth-guard';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { quoteId } = body as { quoteId: string };
+    const { quoteId, callerUserId } = body as { quoteId: string; callerUserId?: string };
 
     if (!quoteId) {
       return NextResponse.json({ error: 'quoteId is required.' }, { status: 400 });
@@ -17,6 +18,17 @@ export async function POST(req: Request) {
     const quote = await LedgerEngine.getQuoteAsync(quoteId);
     if (!quote) {
       return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
+    }
+
+    // Authorize caller against quote's business organization
+    const auth = await authorizeRequest(
+      req,
+      quote.businessId,
+      ['requester', 'approver', 'admin'],
+      callerUserId
+    );
+    if (!auth.authorized) {
+      return auth.errorResponse!;
     }
 
     // Expiry check

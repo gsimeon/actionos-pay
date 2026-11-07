@@ -432,6 +432,14 @@ export async function verifyWebhookSignature(params: {
     }
   }
 
+  // In live production mode, simulation headers and mock signatures are strictly forbidden
+  if (process.env.PAYPAL_ENV === 'production') {
+    return {
+      verified: false,
+      reason: 'Live production environment strictly prohibits simulation and mock signatures.',
+    };
+  }
+
   // Simulation test mode: require mock signature token
   const sig =
     params.headers['paypal-transmission-sig'] ||

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyApprovalBinding } from '@/lib/approval-engine';
+import { parseAmountToMinorUnits } from '@/lib/currency';
 import { LedgerEngine } from '@/lib/ledger';
 import { verifyWebhookSignature } from '@/lib/paypal-service';
 import { WebhookEventRecord } from '@/lib/types';
@@ -33,7 +34,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid JSON payload.' }, { status: 400 });
     }
 
-    const eventId = (payload.id as string) || `SIM-EVT-${randomUUID().slice(0, 8)}`;
+    if (!payload.id || typeof payload.id !== 'string' || !payload.id.trim()) {
+      return NextResponse.json(
+        { error: 'Webhook payload invalid: missing event id (payload.id).' },
+        { status: 400 }
+      );
+    }
+    const eventId = payload.id.trim();
     const eventType = (payload.event_type as string) || 'UNKNOWN_EVENT';
 
     // 2. Conflict-Safe Atomic Webhook Claim & Idempotency Check
@@ -104,12 +111,12 @@ export async function POST(req: Request) {
       const relatedIds = (resource.supplementary_data as Record<string, unknown> | undefined)?.related_ids as
         | Record<string, unknown>
         | undefined;
-      const actualOrderId = (relatedIds?.order_id as string) || (resource.id as string);
+      const actualOrderId = relatedIds?.order_id as string | undefined;
 
-      if (!actualOrderId) {
+      if (!actualOrderId || typeof actualOrderId !== 'string' || !actualOrderId.trim()) {
         await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
         return NextResponse.json(
-          { error: 'Webhook payload invalid: missing order reference in resource.', eventId },
+          { error: 'Webhook payload invalid: missing order reference in resource.supplementary_data.related_ids.order_id.', eventId },
           { status: 400 }
         );
       }
@@ -123,9 +130,9 @@ export async function POST(req: Request) {
         );
       }
 
-      // Reconcile exact minor unit cents and currency against approved payment
-      const webhookCents = Math.round(parseFloat(resourceAmount.value) * 100);
+      // Reconcile exact minor units and currency against approved payment using currency-aware precision
       const webhookCurrency = resourceAmount.currency_code;
+      const webhookCents = parseAmountToMinorUnits(resourceAmount.value, webhookCurrency);
 
       if (webhookCents !== payment.amountCents || webhookCurrency !== payment.currency) {
         payment.status = 'failed';
@@ -218,12 +225,14 @@ export async function POST(req: Request) {
         );
       }
 
+      const providerCaptureId = (resource.id as string) || payment.providerCaptureId || 'CAP-UNKNOWN';
+
       // Atomic reconciliation: mark payment captured, transition request to fulfilled, mark webhook processed
       await LedgerEngine.reconcilePaymentCaptureAsync({
         payment,
         webhookRecord,
         quote,
-        providerCaptureId: (resource.id as string) || payment.providerCaptureId || 'CAP-UNKNOWN',
+        providerCaptureId,
       });
     }
 
@@ -237,7 +246,7 @@ export async function POST(req: Request) {
       const relatedIds = (resource.supplementary_data as Record<string, unknown> | undefined)?.related_ids as
         | Record<string, unknown>
         | undefined;
-      const actualOrderId = (relatedIds?.order_id as string) || (resource.id as string);
+      const actualOrderId = relatedIds?.order_id as string | undefined;
 
       if (actualOrderId) {
         const payment = await LedgerEngine.getPaymentByOrderIdAsync(actualOrderId);
@@ -254,7 +263,9 @@ export async function POST(req: Request) {
     }
 
     // Mark webhook event fully processed only AFTER successful reconciliation
-    await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'processed');
+    if (webhookRecord.status !== 'processed') {
+      await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'processed');
+    }
 
     return NextResponse.json({
       success: true,

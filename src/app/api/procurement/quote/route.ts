@@ -2,14 +2,16 @@ import { NextResponse } from 'next/server';
 import { evaluatePolicy } from '@/lib/policy-engine';
 import { calculateQuote, QuoteInputItem } from '@/lib/quote-engine';
 import { LedgerEngine } from '@/lib/ledger';
+import { authorizeRequest } from '@/lib/auth-guard';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { requestId, supplierId, items } = body as {
+    const { requestId, supplierId, items, callerUserId } = body as {
       requestId: string;
       supplierId: string;
       items: QuoteInputItem[];
+      callerUserId?: string;
     };
 
     if (!requestId || !supplierId || !items || !Array.isArray(items) || items.length === 0) {
@@ -23,6 +25,17 @@ export async function POST(req: Request) {
     const procurementRequest = await LedgerEngine.getRequestAsync(requestId);
     if (!procurementRequest) {
       return NextResponse.json({ error: `Request "${requestId}" not found.` }, { status: 404 });
+    }
+
+    // Authorize caller against request's business organization
+    const auth = await authorizeRequest(
+      req,
+      procurementRequest.businessId,
+      ['requester', 'approver', 'admin'],
+      callerUserId
+    );
+    if (!auth.authorized) {
+      return auth.errorResponse!;
     }
 
     const quote = calculateQuote({

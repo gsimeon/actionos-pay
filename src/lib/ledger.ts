@@ -512,21 +512,35 @@ export class LedgerEngine {
 
     const store = getStore();
     const existing = store.webhooks.get(rec.eventId);
+    const now = Date.now();
+    const leaseSeconds = 60;
+    const leaseExpiresAt = new Date(now + leaseSeconds * 1000).toISOString();
+
     if (existing) {
       if (existing.status === 'processed' || existing.status === 'duplicate') {
         return { claimed: false, status: 'duplicate', record: existing };
       }
       if (existing.status === 'received') {
-        return { claimed: false, status: 'in_progress', record: existing };
+        // If lease is active, event is actively being processed by another worker
+        if (existing.claimLeaseExpiresAt && new Date(existing.claimLeaseExpiresAt).getTime() > now) {
+          return { claimed: false, status: 'in_progress', record: existing };
+        } else {
+          // Stale claim lease expired (abandoned or crashed worker). Safely recover!
+          existing.claimLeaseExpiresAt = leaseExpiresAt;
+          existing.payload = rec.payload;
+          return { claimed: true, status: 'retryable', record: existing };
+        }
       }
       if (existing.status === 'failed') {
         existing.status = 'received';
         existing.payload = rec.payload;
         existing.processedAt = undefined;
+        existing.claimLeaseExpiresAt = leaseExpiresAt;
         return { claimed: true, status: 'retryable', record: existing };
       }
     }
 
+    rec.claimLeaseExpiresAt = leaseExpiresAt;
     store.webhooks.set(rec.eventId, rec);
     return { claimed: true, status: 'received', record: rec };
   }
@@ -550,6 +564,7 @@ export class LedgerEngine {
 
     webhookRecord.status = 'processed';
     webhookRecord.processedAt = new Date().toISOString();
+    webhookRecord.claimLeaseExpiresAt = undefined;
 
     // Database persistence when Supabase configured
     if (isSupabaseConfigured()) {

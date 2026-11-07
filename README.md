@@ -45,7 +45,7 @@ Requirements: Node.js 20.9+ and npm.
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (42/42 passing)
+# 2. Run automated test suites (65/65 passing)
 npm test
 
 # 3. Start development server
@@ -84,26 +84,26 @@ AI_MODEL=gemini-1.5-flash
 
 > **Security Invariant**: When `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are configured with valid credentials, all PayPal API failures (authentication errors, rate limits, instrument declines) fail loudly with explicit failure states. They **never** fall back to simulated success. Simulation is strictly quarantined for credential-free demos with explicit indicators (`SIM-DEMO-ORD-`, `isSimulated: true`), and template placeholders (`your-*`) are automatically ignored.
 
-## Test Suites (54 Tests Passing)
+## Test Suites (65 Tests Passing)
 
-The test suite covers arithmetic precision, policy guardrails, approval binding, adversarial attacks, PayPal anti-false-positive safety, Supabase persistence durability, and end-to-end flows:
+The test suite covers arithmetic precision, multi-currency decimal accuracy, policy guardrails, approval binding, adversarial attacks, PayPal anti-false-positive safety, Supabase persistence durability, and end-to-end flows:
 
 ```bash
 npm test
 ```
 
-- `tests/unit/currency-and-quote.test.ts` (8 tests): Minor-unit arithmetic, float safety, tax math, quote calculation, SHA-256 seal.
+- `tests/unit/currency-and-quote.test.ts` (11 tests): Minor-unit arithmetic, float safety, ISO currency decimal mapping, multi-currency decimal string parsing and formatting without precision loss, tax math, quote calculation, and SHA-256 seal.
 - `tests/unit/policy-and-approval.test.ts` (6 tests): Approved vendor verification, budget limits, role authority, SoD self-approval ban.
 - `tests/unit/paypal-safety.test.ts` (6 tests): Anti-false-positive guarantees, placeholder credentials safety, capture error propagation, explicit simulated status indicators (`SIM-DEMO-`), capture idempotency, and strict webhook header validation.
 - `tests/unit/supabase.test.ts` (4 tests): Supabase client initialization, configuration checks, placeholder safety, and error throwing on database write failures.
 - `tests/adversarial/security-guardrails.test.ts` (7 tests): Client price tampering, in-flight term alteration, unapproved vendor attempts, missing approval rejection, double-capture prevention, duplicate webhook deduplication.
-- `tests/adversarial/authorization-and-persistence.test.ts` (21 tests): Server-side approver identity gate, Supabase Auth Bearer session token verification, database-backed membership/role lookup, SoD enforcement, mandatory HMAC secret-backed signature verification with constant-time comparison, legacy SHA-256 rejection, quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), conflict-safe atomic webhook event claiming, webhook approval cryptographic binding verification, atomic payment reconciliation, missing/invalid capture amount rejection, failed webhook retryability, and prohibition of synchronous persistence when Supabase is configured.
+- `tests/adversarial/authorization-and-persistence.test.ts` (29 tests): Server-side approver identity gate, Supabase Auth Bearer session token verification across routes, database-backed membership/role lookup, SoD enforcement, mandatory HMAC secret-backed signature verification with constant-time comparison, legacy SHA-256 rejection, exclusive dedicated `APPROVAL_SIGNING_SECRET` requirement (disallowing `SUPABASE_SERVICE_ROLE_KEY` fallback), quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), conflict-safe atomic webhook event claiming with 60s lease TTL & abandoned worker recovery, strict webhook event ID and order reference validation, production mock signature rejection, webhook approval cryptographic binding verification, atomic payment reconciliation, missing/invalid capture amount rejection, failed webhook retryability, and prohibition of synchronous persistence when Supabase is configured.
 - `tests/integration/procurement-flow.test.ts` (2 tests): End-to-end deterministic lifecycle via service layer and full lifecycle execution through actual Next.js App Router HTTP handlers (`plan` -> `quote` -> `approve` -> `create-order` -> `capture-order` -> `webhook`).
 
 ## Database Migrations
 
 - `supabase/migrations/00001_initial_schema.sql`: 11 tables with RLS policies, foreign keys, and indexes.
-- `supabase/migrations/00002_atomic_reconciliation.sql`: Stored procedures for conflict-safe atomic webhook event claiming and transactional payment reconciliation.
+- `supabase/migrations/00002_atomic_reconciliation.sql`: Schema evolution and transactional stored procedures (`claim_webhook_event`, `reconcile_payment_capture_atomic`, `create_quote_atomic`) for conflict-safe atomic webhook event claiming with lease expiry recovery, atomic quote creation, and single-transaction payment reconciliation.
 - `supabase/seed.sql`: Deterministic tenant, team members, approved/unapproved suppliers, and catalogue products in minor units.
 
 ## License

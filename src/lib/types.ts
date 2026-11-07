@@ -182,6 +182,7 @@ export interface WebhookEventRecord {
   signatureVerified: boolean;
   payload: Record<string, unknown>;
   status: 'received' | 'processed' | 'duplicate' | 'failed';
+  claimLeaseExpiresAt?: string;
   processedAt?: string;
   createdAt: string;
 }

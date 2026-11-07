@@ -34,16 +34,16 @@ export function safeTimingCompareHex(a: string, b: string): boolean {
 
 /**
  * Retrieves the cryptographic secret key used for HMAC-SHA256 approval signing.
- * Fails closed if missing or below minimum cryptographic strength (32 characters).
+ * Requires APPROVAL_SIGNING_SECRET exclusively and fails closed if missing or below
+ * minimum cryptographic strength (32 characters). Shared infrastructure keys
+ * (such as SUPABASE_SERVICE_ROLE_KEY) or default secrets are strictly rejected.
  */
 export function getApprovalSigningSecret(): string {
-  const secret =
-    process.env.APPROVAL_SIGNING_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secret = process.env.APPROVAL_SIGNING_SECRET;
 
   if (!secret || secret.trim().length < 32) {
     throw new Error(
-      'Cryptographic Failure: Dedicated APPROVAL_SIGNING_SECRET (or valid SUPABASE_SERVICE_ROLE_KEY >= 32 chars) is required. Insecure default or weak fallback secrets are rejected.'
+      'Cryptographic Failure: Dedicated APPROVAL_SIGNING_SECRET (>= 32 chars) is required. Shared infrastructure keys (such as SUPABASE_SERVICE_ROLE_KEY) or weak fallback secrets are strictly prohibited.'
     );
   }
   return secret.trim();

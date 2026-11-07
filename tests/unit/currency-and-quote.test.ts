@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { calculateLineTotal, calculateTax, centsToDecimalString, decimalStringToCents, formatCurrency } from '../../src/lib/currency';
+import {
+  calculateLineTotal,
+  calculateTax,
+  centsToDecimalString,
+  decimalStringToCents,
+  formatCurrency,
+  getCurrencyDecimals,
+  minorUnitsToDecimalString,
+  parseAmountToMinorUnits,
+} from '../../src/lib/currency';
 import { calculateQuote, computeQuoteChecksum, verifyQuoteIntegrity } from '../../src/lib/quote-engine';
 
 describe('Currency and Minor Unit Arithmetic', () => {
@@ -21,6 +30,45 @@ describe('Currency and Minor Unit Arithmetic', () => {
     expect(decimalStringToCents('1,799.00')).toBe(179900);
     expect(decimalStringToCents('0.99')).toBe(99);
     expect(decimalStringToCents('49.5')).toBe(4950);
+  });
+
+  it('correctly reports ISO currency decimal places', () => {
+    expect(getCurrencyDecimals('JPY')).toBe(0);
+    expect(getCurrencyDecimals('KRW')).toBe(0);
+    expect(getCurrencyDecimals('USD')).toBe(2);
+    expect(getCurrencyDecimals('EUR')).toBe(2);
+    expect(getCurrencyDecimals('GBP')).toBe(2);
+    expect(getCurrencyDecimals('BHD')).toBe(3);
+    expect(getCurrencyDecimals('KWD')).toBe(3);
+    expect(getCurrencyDecimals('OMR')).toBe(3);
+  });
+
+  it('converts multi-currency minor units to decimal strings accurately', () => {
+    // 0-decimal currencies
+    expect(minorUnitsToDecimalString(5000, 'JPY')).toBe('5000');
+    expect(minorUnitsToDecimalString(125000, 'KRW')).toBe('125000');
+
+    // 2-decimal currencies
+    expect(minorUnitsToDecimalString(179900, 'USD')).toBe('1799.00');
+    expect(minorUnitsToDecimalString(5, 'EUR')).toBe('0.05');
+
+    // 3-decimal currencies
+    expect(minorUnitsToDecimalString(1250, 'BHD')).toBe('1.250');
+    expect(minorUnitsToDecimalString(5, 'KWD')).toBe('0.005');
+  });
+
+  it('parses multi-currency decimal strings into exact minor units without precision loss', () => {
+    // 0-decimal currencies
+    expect(parseAmountToMinorUnits('5000', 'JPY')).toBe(5000);
+    expect(() => parseAmountToMinorUnits('5000.75', 'JPY')).toThrow();
+
+    // 2-decimal currencies
+    expect(parseAmountToMinorUnits('1799.00', 'USD')).toBe(179900);
+    expect(parseAmountToMinorUnits('0.99', 'EUR')).toBe(99);
+
+    // 3-decimal currencies
+    expect(parseAmountToMinorUnits('1.250', 'BHD')).toBe(1250);
+    expect(parseAmountToMinorUnits('0.005', 'KWD')).toBe(5);
   });
 
   it('calculates line item totals with integer safety', () => {

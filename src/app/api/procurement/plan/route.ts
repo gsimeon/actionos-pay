@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { parseProcurementIntent } from '@/lib/ai-planner';
-import { DEMO_BUSINESS, DEMO_MEMBERS } from '@/lib/catalog';
+import { DEMO_BUSINESS } from '@/lib/catalog';
 import { LedgerEngine } from '@/lib/ledger';
 import { ProcurementRequest } from '@/lib/types';
+import { authorizeRequest } from '@/lib/auth-guard';
 import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
@@ -14,10 +15,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Prompt must be a non-empty string.' }, { status: 400 });
     }
 
-    const requester =
-      DEMO_MEMBERS.find((m) => m.userId === requesterId) ||
-      DEMO_MEMBERS.find((m) => m.role === 'requester') ||
-      DEMO_MEMBERS[0];
+    // Authorization & Tenant Boundary Enforcement
+    const auth = await authorizeRequest(
+      req,
+      DEMO_BUSINESS.id,
+      ['requester', 'approver', 'admin'],
+      requesterId
+    );
+    if (!auth.authorized || !auth.member) {
+      return auth.errorResponse!;
+    }
+    const requester = auth.member;
 
     const plan = await parseProcurementIntent(
       prompt.trim(),
