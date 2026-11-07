@@ -5,6 +5,21 @@
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- Supabase Auth compatibility stub (ensures migration applies cleanly on standalone PostgreSQL)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
+    CREATE SCHEMA auth;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p 
+    JOIN pg_namespace n ON p.pronamespace = n.oid 
+    WHERE n.nspname = 'auth' AND p.proname = 'uid'
+  ) THEN
+    CREATE FUNCTION auth.uid() RETURNS UUID AS 'SELECT NULLIF(current_setting(''request.jwt.claim.sub'', true), '''')::UUID;' LANGUAGE sql STABLE;
+  END IF;
+END $$;
+
 -- 1. Businesses (Tenants)
 CREATE TABLE IF NOT EXISTS businesses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
