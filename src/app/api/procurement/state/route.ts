@@ -3,14 +3,24 @@ import { DEMO_BUSINESS, DEMO_MEMBERS, DEMO_PRODUCTS, DEMO_SUPPLIERS } from '@/li
 import { LedgerEngine } from '@/lib/ledger';
 import { fetchAuditEventsFromSupabase, isSupabaseConfigured } from '@/lib/supabase';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const requests = LedgerEngine.getAllRequests();
-    let auditEvents = LedgerEngine.getAuditEvents();
+    const url = new URL(req.url);
+    const requestedBusinessId =
+      url.searchParams.get('businessId') ||
+      req.headers.get('x-business-id') ||
+      DEMO_BUSINESS.id;
+
+    let requests = LedgerEngine.getAllRequests();
+    if (requestedBusinessId) {
+      requests = requests.filter((r) => r.businessId === requestedBusinessId);
+    }
+
+    let auditEvents = LedgerEngine.getAuditEvents(requestedBusinessId);
 
     const isConnected = isSupabaseConfigured();
     if (isConnected) {
-      const supabaseEvents = await fetchAuditEventsFromSupabase(DEMO_BUSINESS.id);
+      const supabaseEvents = await fetchAuditEventsFromSupabase(requestedBusinessId);
       if (supabaseEvents && supabaseEvents.length > 0) {
         // Merge Supabase events with any local events, deduplicated by id
         const eventMap = new Map();
@@ -23,12 +33,30 @@ export async function GET() {
       }
     }
 
+    const business =
+      requestedBusinessId === DEMO_BUSINESS.id
+        ? DEMO_BUSINESS
+        : {
+            id: requestedBusinessId,
+            name: `Organization ${requestedBusinessId.slice(0, 8)}`,
+            slug: `org-${requestedBusinessId.slice(0, 8)}`,
+            defaultCurrency: 'USD',
+            budgetLimitCents: 1000000,
+            createdAt: new Date().toISOString(),
+          };
+
     return NextResponse.json({
       success: true,
-      business: DEMO_BUSINESS,
-      members: DEMO_MEMBERS,
-      suppliers: DEMO_SUPPLIERS,
-      products: DEMO_PRODUCTS,
+      business,
+      members: DEMO_MEMBERS.filter(
+        (m) => m.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+      ),
+      suppliers: DEMO_SUPPLIERS.filter(
+        (s) => s.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+      ),
+      products: DEMO_PRODUCTS.filter(
+        (p) => p.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+      ),
       requests,
       auditEvents,
       isSupabaseConnected: isConnected,
