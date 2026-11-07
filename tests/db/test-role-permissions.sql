@@ -86,6 +86,8 @@ $$;
 -- Grant minimal table usage so role permissions test stored procedures cleanly
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 
 -- =============================================================================
 -- 1. ROLE TEST: anon (Untrusted anonymous caller)
