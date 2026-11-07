@@ -13,6 +13,7 @@ import {
   fetchQuoteFromSupabase,
   fetchRequestFromSupabase,
   fetchWebhookFromSupabase,
+  getSupabase,
   updateWebhookStatusInSupabase,
   isSupabaseConfigured,
   persistApprovalToSupabase,
@@ -588,7 +589,12 @@ export class LedgerEngine {
       store.requests.set(req.id, req);
     }
 
-    await this.logAuditAsync({
+    // Record immutable audit event:
+    // When Supabase is configured, reconcilePaymentCaptureInSupabase (reconcile_payment_capture_atomic)
+    // already authoritatively persisted the audit event inside the PostgreSQL transaction.
+    // Adding to store.auditEvents directly avoids duplicate remote audit writes in Supabase.
+    const auditRecord: AuditEvent = {
+      id: randomUUID(),
       businessId: payment.businessId,
       entityType: 'payment',
       entityId: payment.id,
@@ -603,7 +609,43 @@ export class LedgerEngine {
         quoteId: quote.id,
         requestId: quote.requestId,
       },
-    });
+      createdAt: new Date().toISOString(),
+    };
+    store.auditEvents.push(auditRecord);
+  }
+
+  /**
+   * Scans for webhook events with expired claim leases and resets them for safe reprocessing.
+   */
+  static async recoverExpiredWebhookClaimsAsync(): Promise<number> {
+    const store = getStore();
+    const now = Date.now();
+    let recoveredCount = 0;
+
+    for (const webhook of store.webhooks.values()) {
+      if (
+        webhook.status === 'received' &&
+        webhook.claimLeaseExpiresAt &&
+        new Date(webhook.claimLeaseExpiresAt).getTime() < now
+      ) {
+        webhook.claimLeaseExpiresAt = undefined;
+        recoveredCount++;
+      }
+    }
+
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabase();
+      if (supabase) {
+        const { data, error } = await supabase.rpc('recover_expired_webhook_claims', {
+          p_max_count: 50,
+        });
+        if (!error && Array.isArray(data)) {
+          recoveredCount += data.length;
+        }
+      }
+    }
+
+    return recoveredCount;
   }
 
   static async getWebhookEventAsync(eventId: string): Promise<WebhookEventRecord | undefined> {

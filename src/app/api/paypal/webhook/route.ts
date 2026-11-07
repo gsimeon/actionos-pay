@@ -57,6 +57,21 @@ export async function POST(req: Request) {
 
     const claimResult = await LedgerEngine.claimWebhookEventAsync(initialWebhookRecord);
     if (!claimResult.claimed) {
+      if (claimResult.status === 'in_progress') {
+        // Return 429 with Retry-After so PayPal continues retry sequence instead of acknowledging prematurely
+        return NextResponse.json(
+          {
+            error: 'Webhook event is actively being processed by another worker lease.',
+            eventId,
+            status: 'in_progress',
+          },
+          {
+            status: 429,
+            headers: { 'Retry-After': '10' },
+          }
+        );
+      }
+
       return NextResponse.json(
         { message: 'Duplicate webhook event ignored.', eventId, status: 'duplicate' },
         { status: 200 }
@@ -82,6 +97,19 @@ export async function POST(req: Request) {
         await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
         return NextResponse.json(
           { error: `Webhook capture status is "${resource.status}", expected "COMPLETED".`, eventId },
+          { status: 400 }
+        );
+      }
+
+      // Mandatory Provider Capture Identifier Check: Missing or empty capture ID is strictly rejected
+      const providerCaptureId = (resource.id as string | undefined)?.trim();
+      if (!providerCaptureId) {
+        await LedgerEngine.updateWebhookStatusAsync(webhookRecord, 'failed');
+        return NextResponse.json(
+          {
+            error: 'Webhook payload invalid: missing provider capture identifier (resource.id).',
+            eventId,
+          },
           { status: 400 }
         );
       }
@@ -224,8 +252,6 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-
-      const providerCaptureId = (resource.id as string) || payment.providerCaptureId || 'CAP-UNKNOWN';
 
       // Atomic reconciliation: mark payment captured, transition request to fulfilled, mark webhook processed
       await LedgerEngine.reconcilePaymentCaptureAsync({

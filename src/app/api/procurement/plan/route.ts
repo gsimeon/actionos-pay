@@ -15,10 +15,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Prompt must be a non-empty string.' }, { status: 400 });
     }
 
-    // Authorization & Tenant Boundary Enforcement
+    const requestedBusinessId =
+      (body.businessId as string | undefined) ||
+      req.headers.get('x-business-id') ||
+      undefined;
+
+    // Authorization & Dynamic Tenant Boundary Enforcement
     const auth = await authorizeRequest(
       req,
-      DEMO_BUSINESS.id,
+      requestedBusinessId,
       ['requester', 'approver', 'admin'],
       requesterId
     );
@@ -26,6 +31,7 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
     const requester = auth.member;
+    const businessId = requester.businessId;
 
     const plan = await parseProcurementIntent(
       prompt.trim(),
@@ -35,7 +41,7 @@ export async function POST(req: Request) {
     const requestId = randomUUID();
     const procurementRequest: ProcurementRequest = {
       id: requestId,
-      businessId: DEMO_BUSINESS.id,
+      businessId,
       requesterId: requester.userId,
       requesterName: requester.userName,
       rawPrompt: prompt.trim(),
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
     await LedgerEngine.saveRequestAsync(procurementRequest);
 
     await LedgerEngine.logAuditAsync({
-      businessId: DEMO_BUSINESS.id,
+      businessId,
       entityType: 'request',
       entityId: requestId,
       actorId: requester.userId,

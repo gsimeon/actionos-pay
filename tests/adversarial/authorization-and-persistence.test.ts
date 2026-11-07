@@ -4,6 +4,7 @@ import { POST as approveRoute } from '@/app/api/procurement/approve/route';
 import { POST as webhookRoute } from '@/app/api/paypal/webhook/route';
 import { POST as createOrderRoute } from '@/app/api/paypal/create-order/route';
 import { POST as captureOrderRoute } from '@/app/api/paypal/capture-order/route';
+import { POST as planRoute } from '@/app/api/procurement/plan/route';
 import { LedgerEngine } from '@/lib/ledger';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
 import {
@@ -13,7 +14,13 @@ import {
   safeTimingCompareHex,
 } from '@/lib/approval-engine';
 import { Quote, ProcurementRequest, PaymentAttempt, Approval, WebhookEventRecord } from '@/lib/types';
-import { persistRequestToSupabase, resetSupabaseClientForTesting } from '@/lib/supabase';
+import {
+  persistRequestToSupabase,
+  persistQuoteToSupabase,
+  claimWebhookEventInSupabase,
+  reconcilePaymentCaptureInSupabase,
+  resetSupabaseClientForTesting,
+} from '@/lib/supabase';
 import { DEMO_MEMBERS } from '@/lib/catalog';
 
 describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
@@ -328,6 +335,58 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       expect(res.status).toBe(403);
       const json = await res.json();
       expect(json.error).toContain('does not belong to business');
+    });
+
+    it('strictly rejects unauthenticated demo fallback in production mode unless APP_MODE=demo', async () => {
+      const env = process.env as Record<string, string | undefined>;
+      const oldNodeEnv = env.NODE_ENV;
+      const oldAppMode = env.APP_MODE;
+      try {
+        env.NODE_ENV = 'production';
+        delete env.APP_MODE;
+
+        const req = new Request('http://localhost/api/procurement/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            quoteId: validQuote.id,
+            decision: 'approved',
+            approverUserId: approverMember.userId,
+          }),
+        });
+
+        const res = await approveRoute(req);
+        expect(res.status).toBe(500);
+        const json = await res.json();
+        expect(json.error).toContain('Demo mode fallback is prohibited unless APP_MODE=demo');
+      } finally {
+        env.NODE_ENV = oldNodeEnv;
+        if (oldAppMode) env.APP_MODE = oldAppMode;
+        else delete env.APP_MODE;
+      }
+    });
+
+    it('dynamically assigns procurement request to the caller business instead of hardcoded demo business', async () => {
+      const customTenantId = '00000000-0000-4000-8000-000000000001';
+      const req = new Request('http://localhost/api/procurement/plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-business-id': customTenantId,
+          'x-demo-user-id': requesterMember.userId,
+        },
+        body: JSON.stringify({
+          prompt: 'Need 1 Dell monitor for design department',
+          businessId: customTenantId,
+        }),
+      });
+
+      const res = await planRoute(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.request.businessId).toBe(customTenantId);
+      expect(json.request.requesterId).toBe(requesterMember.userId);
     });
   });
 
@@ -990,6 +1049,104 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         else delete process.env.PAYPAL_ENV;
       }
     });
+
+    it('returns HTTP 429 with Retry-After when webhook event is actively in progress under worker lease', async () => {
+      const activeEventId = 'WH-EVT-LEASE-IN-PROGRESS-1';
+      const initialRecord: WebhookEventRecord = {
+        id: 'rec-in-progress-1',
+        provider: 'paypal',
+        eventId: activeEventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: activeEventId },
+        status: 'received',
+        claimLeaseExpiresAt: new Date(Date.now() + 45000).toISOString(),
+        createdAt: new Date().toISOString(),
+      };
+      await LedgerEngine.claimWebhookEventAsync(initialRecord);
+
+      // Now PayPal retries while worker lease is active:
+      const webhookPayload = {
+        id: activeEventId,
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          id: 'CAP-TEST-123',
+          status: 'COMPLETED',
+        },
+      };
+
+      const req = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      const res = await webhookRoute(req);
+      expect(res.status).toBe(429);
+      expect(res.headers.get('Retry-After')).toBe('10');
+      const json = await res.json();
+      expect(json.status).toBe('in_progress');
+      expect(json.error).toContain('actively being processed');
+    });
+
+    it('rejects capture webhook with 400 when resource.id is missing and never defaults to CAP-UNKNOWN', async () => {
+      const webhookPayload = {
+        id: 'WH-EVT-MISSING-CAPTURE-ID',
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: {
+          // Missing id
+          status: 'COMPLETED',
+          amount: { value: '1095.00', currency_code: 'USD' },
+          supplementary_data: {
+            related_ids: { order_id: 'ORD-PP-RECON-1' },
+          },
+        },
+      };
+
+      const req = new Request('http://localhost/api/paypal/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'paypal-transmission-sig': 'valid-simulation-sig-12345',
+        },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      const res = await webhookRoute(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toContain('missing provider capture identifier (resource.id)');
+    });
+
+    it('scans and recovers expired webhook claims independently of provider retries', async () => {
+      const expiredEventId = 'WH-EVT-BACKGROUND-RECOVER-1';
+      const expiredRecord: WebhookEventRecord = {
+        id: 'rec-bg-expired-1',
+        provider: 'paypal',
+        eventId: expiredEventId,
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: expiredEventId },
+        status: 'received',
+        claimLeaseExpiresAt: new Date(Date.now() - 30000).toISOString(), // Expired 30s ago
+        createdAt: new Date(Date.now() - 90000).toISOString(),
+      };
+
+      await LedgerEngine.claimWebhookEventAsync(expiredRecord);
+      const stored = await LedgerEngine.getWebhookEventAsync(expiredEventId);
+      if (stored) {
+        stored.claimLeaseExpiresAt = new Date(Date.now() - 30000).toISOString();
+      }
+
+      const recovered = await LedgerEngine.recoverExpiredWebhookClaimsAsync();
+      expect(recovered).toBeGreaterThanOrEqual(1);
+
+      const checkRecord = await LedgerEngine.getWebhookEventAsync(expiredEventId);
+      expect(checkRecord?.claimLeaseExpiresAt).toBeUndefined();
+    });
   });
 
   describe('Supabase Error Surfacing', () => {
@@ -1003,6 +1160,60 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
 
         // When Supabase is configured, failed initialization or write must throw, never swallow
         await expect(persistRequestToSupabase(mockRequest)).rejects.toThrow();
+      } finally {
+        if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        resetSupabaseClientForTesting();
+      }
+    });
+
+    it('strictly fails closed when Supabase is configured and atomic RPC fails (no silent sequential fallback)', async () => {
+      const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      try {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-supabase-project.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key-that-will-fail-network-call-32chars';
+        resetSupabaseClientForTesting();
+
+        // 1. Transactional quote persistence must fail closed
+        await expect(persistQuoteToSupabase(validQuote)).rejects.toThrow();
+
+        // 2. Transactional webhook claiming must fail closed
+        const webhookRec: WebhookEventRecord = {
+          id: 'evt-fail-closed-1',
+          provider: 'paypal',
+          eventId: 'WH-FAIL-CLOSED-1',
+          eventType: 'PAYMENT.CAPTURE.COMPLETED',
+          signatureVerified: true,
+          payload: {},
+          status: 'received',
+          createdAt: new Date().toISOString(),
+        };
+        await expect(claimWebhookEventInSupabase(webhookRec)).rejects.toThrow();
+
+        // 3. Transactional payment reconciliation must fail closed
+        const paymentAttempt: PaymentAttempt = {
+          id: 'pay-fail-closed-1',
+          quoteId: validQuote.id,
+          businessId: validQuote.businessId,
+          provider: 'paypal',
+          amountCents: 109500,
+          currency: 'USD',
+          status: 'created',
+          idempotencyKey: 'idem-fail-closed-1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await expect(
+          reconcilePaymentCaptureInSupabase({
+            payment: paymentAttempt,
+            webhookRecord: webhookRec,
+            quote: validQuote,
+            providerCaptureId: 'CAP-123',
+          })
+        ).rejects.toThrow();
       } finally {
         if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
         else delete process.env.NEXT_PUBLIC_SUPABASE_URL;

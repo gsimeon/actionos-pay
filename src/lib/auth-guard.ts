@@ -22,7 +22,7 @@ export interface AuthorizeOptions {
 
 export async function authorizeRequest(
   req: Request,
-  targetBusinessId: string,
+  targetBusinessId?: string,
   allowedRoles: UserRole[] = ['requester', 'approver', 'admin'],
   clientSuppliedUserId?: string,
   options?: AuthorizeOptions
@@ -104,7 +104,7 @@ export async function authorizeRequest(
       };
     }
 
-    // Resolve active membership from database
+    // Resolve active membership from database (dynamic tenant resolution if targetBusinessId omitted)
     const member = await fetchMembershipFromSupabase(authenticatedUserId, targetBusinessId);
     if (!member) {
       return {
@@ -118,8 +118,8 @@ export async function authorizeRequest(
       };
     }
 
-    // Strict tenant boundary check
-    if (member.businessId !== targetBusinessId) {
+    // Strict tenant boundary check if target organization was specified
+    if (targetBusinessId && member.businessId !== targetBusinessId) {
       return {
         authorized: false,
         errorResponse: NextResponse.json(
@@ -147,7 +147,24 @@ export async function authorizeRequest(
     return { authorized: true, member };
   }
 
-  // --- 2. Demo Mode (Supabase Not Configured) ---
+  // --- 2. Production Security Gate: Prevent silent demo fallback in production ---
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isDemoExplicitlyAllowed = process.env.APP_MODE === 'demo' || !isProduction;
+
+  if (isProduction && !isDemoExplicitlyAllowed) {
+    return {
+      authorized: false,
+      errorResponse: NextResponse.json(
+        {
+          error:
+            'Production Configuration Invariant: Supabase authentication is mandatory in production environment. Demo mode fallback is prohibited unless APP_MODE=demo.',
+        },
+        { status: 500 }
+      ),
+    };
+  }
+
+  // --- 3. Demo Mode (Local / Development / Test / Sandbox Only) ---
   const resolvedUserId =
     clientSuppliedUserId ||
     req.headers.get('x-demo-user-id') ||
@@ -174,7 +191,7 @@ export async function authorizeRequest(
     };
   }
 
-  if (member.businessId !== targetBusinessId) {
+  if (targetBusinessId && member.businessId !== targetBusinessId) {
     return {
       authorized: false,
       errorResponse: NextResponse.json(
