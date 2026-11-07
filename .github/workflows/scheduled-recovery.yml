@@ -22,8 +22,20 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Preflight Verification of Recovery Configuration
+        run: |
+          echo "Verifying webhook recovery secrets and configuration..."
+          if [ -z "${{ secrets.WEBHOOK_RECOVERY_URL }}" ]; then
+            echo "::error::Missing required secret: WEBHOOK_RECOVERY_URL. Workflow cannot run without a target endpoint."
+            exit 1
+          fi
+          if [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "::error::Missing required secret: CRON_SECRET. Workflow cannot authenticate with the recovery endpoint."
+            exit 1
+          fi
+          echo "Configuration preflight verified successfully."
+
       - name: Trigger Operational Recovery Endpoint
-        if: env.WEBHOOK_RECOVERY_URL != ''
         env:
           WEBHOOK_RECOVERY_URL: ${{ secrets.WEBHOOK_RECOVERY_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -32,22 +44,35 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${WEBHOOK_RECOVERY_URL}/api/paypal/webhook/recover" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
-            -d '{"batchSize": 25, "leaseSeconds": 60, "maxRetries": 5}')
+            -d '{"batchSize": 25, "leaseSeconds": 60, "maxRetries": 5, "strict": true}')
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
           echo "Worker Response (HTTP $HTTP_CODE): $BODY"
           
           if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "::error::Recovery worker failed with HTTP $HTTP_CODE"
+            echo "::error::Recovery worker endpoint returned error HTTP $HTTP_CODE"
             exit 1
           fi
 
-          EXHAUSTED=$(echo "$BODY" | grep -o '"deadLetteredCount":[0-9]*' | cut -d: -f2 || echo "0")
-          FAILED=$(echo "$BODY" | grep -o '"failedCount":[0-9]*' | cut -d: -f2 || echo "0")
+          # Parse JSON metrics safely
+          FAILED=$(node -e "try { const d = JSON.parse(process.argv[1]); console.log(d.failedCount ?? 0); } catch (e) { console.log(0); }" "$BODY")
+          EXHAUSTED=$(node -e "try { const d = JSON.parse(process.argv[1]); console.log(d.deadLetteredCount ?? 0); } catch (e) { console.log(0); }" "$BODY")
+          CLAIMED=$(node -e "try { const d = JSON.parse(process.argv[1]); console.log(d.claimedCount ?? 0); } catch (e) { console.log(0); }" "$BODY")
+          PROCESSED=$(node -e "try { const d = JSON.parse(process.argv[1]); console.log(d.processedCount ?? 0); } catch (e) { console.log(0); }" "$BODY")
+
+          echo "Recovery summary: Claimed=$CLAIMED, Processed=$PROCESSED, Failed=$FAILED, DeadLettered=$EXHAUSTED"
           
+          # Fail if any webhook events failed processing during this run
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::Recovery worker reported $FAILED failed webhook events during processing. Immediate inspection required."
+            exit 1
+          fi
+
+          # Alert and fail if any events were dead-lettered / exhausted
           if [ "$EXHAUSTED" -gt 0 ]; then
-            echo "::warning::Alert: $EXHAUSTED webhook events reached maximum retries and were dead-lettered."
+            echo "::error::Alert: $EXHAUSTED webhook events reached maximum retries and were moved to DEAD_LETTER status. Escalating for manual investigation."
+            exit 1
           fi
 
       - name: Execute Recovery Worker Suite (Automated In-Process Verification)
