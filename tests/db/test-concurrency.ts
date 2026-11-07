@@ -269,7 +269,7 @@ async function runConcurrencyTests() {
     console.log('  Session 2 unblocked and acquired lock cleanly.');
 
     const verifyQuote = await client1.query(`SELECT total_cents FROM quotes WHERE id = '${testRollbackQuoteId}'`);
-    if (verifyQuote.rows[0].total_cents !== 47000) {
+    if (parseInt(verifyQuote.rows[0].total_cents, 10) !== 47000) {
       throw new Error(`Isolation Failure: Expected quote total 47000, got ${verifyQuote.rows[0].total_cents}`);
     }
     console.log('✅ PASS: Lock contention and rollback isolation verified across sessions.');
