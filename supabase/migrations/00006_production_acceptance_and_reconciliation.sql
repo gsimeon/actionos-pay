@@ -488,13 +488,13 @@ CREATE OR REPLACE FUNCTION claim_webhook_event(
   p_event_id TEXT,
   p_event_type TEXT,
   p_payload JSONB,
-  p_signature_verified BOOLEAN,
+  p_signature_verified BOOLEAN DEFAULT true,
   p_lease_seconds INT DEFAULT 60
 )
 RETURNS TABLE (
   claimed BOOLEAN,
   claim_status TEXT,
-  event_record webhook_events
+  event_row webhook_events
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
