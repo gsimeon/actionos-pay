@@ -476,9 +476,9 @@ BEGIN
 
   -- 10. Update quote status atomically
   UPDATE quotes
-  SET status = v_quote_status,
-      updated_at = now()
-  WHERE id = p_quote_id;
+  SET status = v_quote_status
+  WHERE id = p_quote_id
+    AND business_id = p_business_id;
 
   GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
   IF v_rows_affected != 1 THEN
