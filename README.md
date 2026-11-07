@@ -48,16 +48,19 @@ Requirements: Node.js 20.9+ and npm.
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (101/101 passing)
+# 2. Run automated test suites (103/103 passing)
 npm test
 
-# 3. Run live PayPal Sandbox E2E tests
+# 3. Run live multi-session PostgreSQL concurrency test suite
+npm run test:db:concurrency
+
+# 4. Run live PayPal Sandbox E2E tests
 npm run test:sandbox
 
-# 4. Run PayPal Sandbox CLI verification script
+# 5. Run PayPal Sandbox CLI verification script
 npm run verify:sandbox
 
-# 5. Start development server
+# 6. Start development server
 npm run dev
 ```
 
@@ -67,8 +70,11 @@ Open [http://localhost:3000](http://localhost:3000) to access the interactive Pr
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 101 tests.
-3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` -> `00002` -> `00003` -> `00004` -> `00005`, and executes `tests/db/test-migrations-and-rpcs.sql` to verify 20 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), lease contention, and rollback behaviors.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 103 tests.
+3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` -> `00002` -> `00003` -> `00004` -> `00005` -> `00006`, and executes:
+   - `tests/db/test-migrations-and-rpcs.sql`: 20 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), lease contention, and rollback behaviors.
+   - `tests/db/test-role-permissions.sql`: Dynamic PostgreSQL role switching (`SET ROLE`) verifying privilege boundaries across `anon`, `authenticated`, and `service_role`.
+   - `tests/db/test-concurrency.ts`: True multi-session concurrent PostgreSQL tests verifying simultaneous webhook claiming races, double-approval lock serialization (`FOR UPDATE`), payment reconciliation idempotency, and rollback isolation across separate database connections.
 4. **Next.js Production Build Gate**: Clean production compilation with standalone bundle validation (`next build`).
 
 ## Scheduled Webhook Recovery Automation

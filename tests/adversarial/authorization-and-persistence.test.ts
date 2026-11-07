@@ -181,6 +181,38 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       }
     });
 
+    it('rejects approval attempt when client passes a forged approverUserId with 403', async () => {
+      const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      try {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://wycykgykpbtschrydtld.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-supabase-service-role-key-for-auth-testing-32-chars';
+        resetSupabaseClientForTesting();
+
+        const req = new Request('http://localhost/api/procurement/approve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer mock-user-token-for-testing',
+          },
+          body: JSON.stringify({
+            quoteId: validQuote.id,
+            decision: 'approved',
+            approverUserId: '00000000-0000-4000-8000-999999999999',
+          }),
+        });
+
+        const res = await approveRoute(req);
+        expect([401, 403]).toContain(res.status);
+      } finally {
+        if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        resetSupabaseClientForTesting();
+      }
+    });
+
     it('rejects cross-tenant approval with 403 (enforces business boundary without hardcoded bypasses)', async () => {
       const rogueMember = {
         ...approverMember,

@@ -22,7 +22,9 @@ import {
   Sparkles,
   HelpCircle,
   Copy,
-  Check
+  Check,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { formatCurrency, centsToDecimalString } from '@/lib/currency';
 import {
@@ -66,6 +68,24 @@ export default function Home() {
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   const [approvalNote, setApprovalNote] = useState('');
   const [copiedHash, setCopiedHash] = useState(false);
+
+  // Theme state: Light is the enterprise default; dark is an optional user preference
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('actionos-theme') as 'light' | 'dark' | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+      document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(nextTheme);
+    localStorage.setItem('actionos-theme', nextTheme);
+    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+  };
 
   // Security playground state
   const [runningAttack, setRunningAttack] = useState<string | null>(null);
@@ -447,9 +467,9 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen text-slate-100 pb-20">
+    <main className="min-h-screen text-[var(--text-primary)] pb-20">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-[var(--border-subtle)] bg-[var(--surface-card)]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 shadow-lg shadow-violet-500/25">
@@ -458,15 +478,15 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-lg font-bold tracking-tight">ActionOS</span>
-                <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-xs font-semibold text-violet-300">PAY</span>
-                <span className="hidden sm:inline-block rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-xs font-semibold text-violet-600 dark:text-violet-300">PAY</span>
+                <span className="hidden sm:inline-block rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                   SANDBOX
                 </span>
                 <span
                   className={`hidden sm:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
                     isSupabaseConnected
-                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                      : 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+                      ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
+                      : 'border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-300'
                   }`}
                   title={
                     isSupabaseConnected
@@ -478,22 +498,22 @@ export default function Home() {
                   {isSupabaseConnected ? 'SUPABASE POSTGRESQL' : 'SUPABASE READY'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">AI Procurement · Human Governance · PayPal Payments</p>
+              <p className="text-[11px] text-[var(--text-secondary)]">AI Procurement · Human Governance · PayPal Payments</p>
             </div>
           </div>
 
           {/* Persona Switcher & Tenant Pill */}
           <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs">
-              <Building2 className="h-3.5 w-3.5 text-slate-400" />
-              <span className="text-slate-300 font-medium">{DEMO_BUSINESS.name}</span>
-              <span className="text-slate-500">|</span>
-              <span className="text-violet-300 font-mono">Limit: {formatCurrency(DEMO_BUSINESS.budgetLimitCents)}</span>
+            <div className="hidden md:flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs">
+              <Building2 className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
+              <span className="text-[var(--text-primary)] font-medium">{DEMO_BUSINESS.name}</span>
+              <span className="text-[var(--text-secondary)]">|</span>
+              <span className="text-violet-600 dark:text-violet-300 font-mono">Limit: {formatCurrency(DEMO_BUSINESS.budgetLimitCents)}</span>
             </div>
 
             {/* Persona Selector */}
-            <div className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-950/30 p-1">
-              <span className="hidden sm:inline-block text-[11px] text-slate-400 pl-2">Persona:</span>
+            <div className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 p-1">
+              <span className="hidden sm:inline-block text-[11px] text-[var(--text-secondary)] pl-2">Persona:</span>
               {DEMO_MEMBERS.map((m) => {
                 const isSelected = currentPersona.userId === m.userId;
                 return (
@@ -503,17 +523,17 @@ export default function Home() {
                     className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
                       isSelected
                         ? 'bg-violet-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5'
                     }`}
                   >
                     <span>{m.userName.split(' ')[0]}</span>
                     <span
                       className={`rounded px-1 text-[9px] uppercase font-bold ${
                         m.role === 'approver'
-                          ? 'bg-amber-400/20 text-amber-300'
+                          ? 'bg-amber-400/20 text-amber-600 dark:text-amber-300'
                           : m.role === 'admin'
-                          ? 'bg-cyan-400/20 text-cyan-300'
-                          : 'bg-slate-400/20 text-slate-300'
+                          ? 'bg-cyan-400/20 text-cyan-600 dark:text-cyan-300'
+                          : 'bg-black/10 dark:bg-slate-400/20 text-[var(--text-secondary)]'
                       }`}
                     >
                       {m.role}
@@ -523,10 +543,19 @@ export default function Home() {
               })}
             </div>
 
+            {/* Theme Toggle (Light Enterprise Default / Dark Optional) */}
+            <button
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+            >
+              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </button>
+
             <button
               onClick={handleReset}
               title="Reset application state"
-              className="rounded-xl border border-white/10 bg-white/5 p-2 text-slate-400 hover:bg-white/10 hover:text-slate-200 transition"
+              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
             >
               <RefreshCw className="h-4 w-4" />
             </button>
@@ -534,7 +563,7 @@ export default function Home() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="mx-auto flex max-w-7xl gap-1 px-4 sm:px-6 lg:px-8 border-t border-white/5">
+        <div className="mx-auto flex max-w-7xl gap-1 px-4 sm:px-6 lg:px-8 border-t border-[var(--border-subtle)]">
           <button
             onClick={() => setActiveTab('studio')}
             className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
@@ -684,7 +713,7 @@ export default function Home() {
                   </button>
                   <button
                     onClick={() => selectPreset('monitors')}
-                    className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-violet-500/20 transition"
+                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-secondary)] hover:bg-violet-500/10 hover:text-[var(--text-primary)] transition"
                   >
                     Monitors & Peripherals
                   </button>
@@ -693,25 +722,25 @@ export default function Home() {
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_200px]">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Purchase Instructions</label>
+                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Purchase Instructions</label>
                   <textarea
                     rows={3}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder="e.g. Order 2 Dell XPS 15 laptops from AfriTech for our engineering team. Budget under $5,000."
-                    className="w-full rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                    className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1.5">Authorized Budget Cap ($)</label>
+                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Authorized Budget Cap ($)</label>
                   <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-500 text-sm">$</span>
+                    <span className="absolute left-3 top-2.5 text-[var(--text-secondary)] text-sm">$</span>
                     <input
                       type="number"
                       value={budgetCap}
                       onChange={(e) => setBudgetCap(e.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-slate-900/90 pl-7 pr-3 py-2.5 text-sm text-white focus:border-violet-500 focus:outline-none"
+                      className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] pl-7 pr-3 py-2.5 text-sm text-[var(--text-primary)] focus:border-violet-500 focus:outline-none"
                     />
                   </div>
                   <button
@@ -879,8 +908,8 @@ export default function Home() {
                   </div>
 
                   {/* Cryptographic SHA-256 Checksum Seal */}
-                  <div className="rounded-xl border border-white/10 bg-slate-900/90 p-3">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                    <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)] mb-1">
                       <span className="flex items-center gap-1 font-semibold text-violet-300">
                         <Lock className="h-3 w-3" /> SHA-256 Cryptographic Integrity Seal:
                       </span>
@@ -1029,7 +1058,7 @@ export default function Home() {
                         value={approvalNote}
                         onChange={(e) => setApprovalNote(e.target.value)}
                         placeholder="Optional approval note or justification (e.g. Q4 engineering team expansion approved)"
-                        className="rounded-xl border border-white/10 bg-slate-900/90 px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:border-violet-500 focus:outline-none"
+                        className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-2.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:border-violet-500 focus:outline-none"
                       />
                       <div className="flex gap-2">
                         <button
@@ -1122,7 +1151,7 @@ export default function Home() {
                 </div>
 
                 {!paymentAttempt ? (
-                  <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/60 p-4">
+                  <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl glass-panel p-4">
                     <div>
                       <p className="text-sm font-semibold text-white">Create PayPal Sandbox Order</p>
                       <p className="text-xs text-slate-400 mt-0.5">

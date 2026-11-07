@@ -52,7 +52,7 @@ DECLARE
   v_caught_exception BOOLEAN;
 BEGIN
   RAISE NOTICE '=======================================================';
-  RAISE NOTICE 'Starting ActionOS Pay Phase 8 Live PostgreSQL Tests...';
+  RAISE NOTICE 'Starting ActionOS Pay Phase 10 Live PostgreSQL Tests...';
   RAISE NOTICE '=======================================================';
 
   -- 1. Setup Base Tenant Data & Memberships
@@ -508,7 +508,7 @@ BEGIN
   END IF;
 
   RAISE NOTICE '=======================================================';
-  RAISE NOTICE 'All 20 ActionOS Pay Phase 9 Live Acceptance Tests PASSED!';
+  RAISE NOTICE 'All 20 ActionOS Pay Phase 10 Live Acceptance Tests PASSED!';
   RAISE NOTICE '=======================================================';
 END;
 $$;

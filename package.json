@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:sandbox": "vitest run tests/integration/paypal-sandbox-e2e.test.ts",
+    "test:db:concurrency": "npx tsx tests/db/test-concurrency.ts",
     "verify:sandbox": "npx tsx scripts/verify-paypal-sandbox.ts"
   },
   "dependencies": {
@@ -23,10 +24,12 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.5.0",
+    "pg": "^8.23.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.0.0",
     "vitest": "^5.0.5"
