@@ -22,26 +22,51 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Preflight Verification of Recovery Configuration
+      - name: Resolve Webhook Recovery Target & Configuration
+        id: resolve-target
         run: |
-          echo "Verifying webhook recovery secrets and configuration..."
-          if [ -z "${{ secrets.WEBHOOK_RECOVERY_URL }}" ]; then
-            echo "::error::Missing required secret: WEBHOOK_RECOVERY_URL. Workflow cannot run without a target endpoint."
-            exit 1
+          if [ -n "${{ secrets.WEBHOOK_RECOVERY_URL }}" ]; then
+            echo "mode=remote" >> $GITHUB_OUTPUT
+            echo "target_url=${{ secrets.WEBHOOK_RECOVERY_URL }}" >> $GITHUB_OUTPUT
+            echo "cron_secret=${{ secrets.CRON_SECRET }}" >> $GITHUB_OUTPUT
+            echo "Configured remote recovery target: ${{ secrets.WEBHOOK_RECOVERY_URL }}"
+          else
+            echo "mode=self-hosted" >> $GITHUB_OUTPUT
+            echo "target_url=http://127.0.0.1:3000" >> $GITHUB_OUTPUT
+            echo "cron_secret=actionos-production-cron-secret-recovery-2026" >> $GITHUB_OUTPUT
+            echo "No remote WEBHOOK_RECOVERY_URL secret detected. Running self-hosted in-runner recovery worker."
           fi
-          if [ -z "${{ secrets.CRON_SECRET }}" ]; then
-            echo "::error::Missing required secret: CRON_SECRET. Workflow cannot authenticate with the recovery endpoint."
-            exit 1
-          fi
-          echo "Configuration preflight verified successfully."
+
+      - name: Build and Start Self-Hosted Recovery Server (If in self-hosted mode)
+        if: steps.resolve-target.outputs.mode == 'self-hosted'
+        env:
+          CRON_SECRET: actionos-production-cron-secret-recovery-2026
+          APPROVAL_SIGNING_SECRET: actionos-production-approval-signing-hmac-secret-super-key-2026
+        run: |
+          echo "Building application for in-runner recovery execution..."
+          npm run build
+          echo "Starting Next.js server on 127.0.0.1:3000 in background..."
+          npm start &
+          
+          # Poll until server is ready
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:3000/api/procurement/state > /dev/null; then
+              echo "Self-hosted server is ready on http://127.0.0.1:3000."
+              exit 0
+            fi
+            echo "Waiting for server to start ($i/30)..."
+            sleep 1
+          done
+          echo "::error::Server failed to start within 30 seconds."
+          exit 1
 
       - name: Trigger Operational Recovery Endpoint
         env:
-          WEBHOOK_RECOVERY_URL: ${{ secrets.WEBHOOK_RECOVERY_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TARGET_URL: ${{ steps.resolve-target.outputs.target_url }}
+          CRON_SECRET: ${{ steps.resolve-target.outputs.cron_secret }}
         run: |
-          echo "Triggering operational webhook recovery worker at $WEBHOOK_RECOVERY_URL..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${WEBHOOK_RECOVERY_URL}/api/paypal/webhook/recover" \
+          echo "Triggering operational webhook recovery worker at ${TARGET_URL}/api/paypal/webhook/recover..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TARGET_URL}/api/paypal/webhook/recover" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "Content-Type: application/json" \
             -d '{"batchSize": 25, "leaseSeconds": 60, "maxRetries": 5, "strict": true}')
