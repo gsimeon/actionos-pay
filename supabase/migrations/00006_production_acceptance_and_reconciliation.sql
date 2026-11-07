@@ -517,7 +517,22 @@ BEGIN
     RAISE EXCEPTION 'Authorization failure: Function claim_webhook_event can only be executed by service_role';
   END IF;
 
-  -- Lock and query existing event row if present
+  -- 1. Try to atomically insert a new claimed event with active lease TTL
+  INSERT INTO webhook_events (
+    id, provider, event_id, event_type, payload, signature_verified, status, claim_lease_expires_at, created_at
+  ) VALUES (
+    p_id, p_provider, p_event_id, p_event_type, p_payload, p_signature_verified, 'received',
+    now() + (p_lease_seconds || ' seconds')::INTERVAL, now()
+  )
+  ON CONFLICT (event_id) DO NOTHING
+  RETURNING * INTO v_existing;
+
+  IF FOUND THEN
+    RETURN QUERY SELECT true, 'claimed'::TEXT, v_existing;
+    RETURN;
+  END IF;
+
+  -- 2. If row already exists (or concurrent insert won the race), lock and evaluate existing row
   SELECT * INTO v_existing FROM webhook_events WHERE event_id = p_event_id FOR UPDATE;
 
   IF FOUND THEN
@@ -553,8 +568,8 @@ BEGIN
           claim_lease_expires_at = now() + (p_lease_seconds || ' seconds')::INTERVAL,
           payload = p_payload,
           signature_verified = CASE WHEN v_existing.signature_verified THEN true ELSE p_signature_verified END
-      WHERE id = v_existing.id
-      RETURNING * INTO v_existing;
+        WHERE id = v_existing.id
+        RETURNING * INTO v_existing;
 
       RETURN QUERY SELECT true, 'retried'::TEXT, v_existing;
       RETURN;
@@ -564,16 +579,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- Insert new claimed event with active lease TTL
-  INSERT INTO webhook_events (
-    id, provider, event_id, event_type, payload, signature_verified, status, claim_lease_expires_at, created_at
-  ) VALUES (
-    p_id, p_provider, p_event_id, p_event_type, p_payload, p_signature_verified, 'received',
-    now() + (p_lease_seconds || ' seconds')::INTERVAL, now()
-  )
-  RETURNING * INTO v_existing;
-
-  RETURN QUERY SELECT true, 'claimed'::TEXT, v_existing;
+  RETURN QUERY SELECT false, 'unknown_claim_state'::TEXT, v_existing;
 END;
 $$;
 
