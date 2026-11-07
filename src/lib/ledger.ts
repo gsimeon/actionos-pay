@@ -226,6 +226,57 @@ export class LedgerEngine {
   // Quote Methods (Async Authoritative)
   static async saveQuoteAsync(quote: Quote, actorId = 'system', actorRole = 'quote_engine'): Promise<void> {
     const store = getStore();
+
+    // 1. Financial Arithmetic & Line Item Invariants
+    if (quote.subtotalCents + quote.taxCents + quote.shippingCents !== quote.totalCents) {
+      throw new Error(
+        `Financial arithmetic violation: Subtotal (${quote.subtotalCents}) + Tax (${quote.taxCents}) + Shipping (${quote.shippingCents}) != Total (${quote.totalCents})`
+      );
+    }
+
+    let sumItems = 0;
+    for (const item of quote.items || []) {
+      if (item.quantity <= 0) {
+        throw new Error(`Quote item integrity violation: Item quantity must be greater than zero, got ${item.quantity}`);
+      }
+      if (item.unitPriceCents < 0) {
+        throw new Error(`Quote item integrity violation: Item unit price cannot be negative, got ${item.unitPriceCents}`);
+      }
+      if (item.quantity * item.unitPriceCents !== item.totalCents) {
+        throw new Error(
+          `Quote item arithmetic violation: Quantity (${item.quantity}) * Unit Price (${item.unitPriceCents}) != Item Total (${item.totalCents})`
+        );
+      }
+      sumItems += item.totalCents;
+    }
+
+    if ((quote.items?.length || 0) > 0 && sumItems !== quote.subtotalCents) {
+      throw new Error(
+        `Quote items arithmetic violation: Sum of quote items (${sumItems} cents) does not match quote subtotal (${quote.subtotalCents} cents)`
+      );
+    }
+
+    // 2. Version Progression & Immutability Verification
+    const existingQuote = store.quotes.get(quote.id);
+    if (existingQuote) {
+      if (existingQuote.requestId !== quote.requestId) {
+        throw new Error(`Immutability violation: Cannot reassign quote to different request`);
+      }
+      if (existingQuote.businessId !== quote.businessId) {
+        throw new Error(`Immutability violation: Cannot reassign quote to different business`);
+      }
+      if (existingQuote.supplierId !== quote.supplierId) {
+        throw new Error(`Immutability violation: Cannot reassign quote to different supplier`);
+      }
+      if (quote.version !== existingQuote.version + 1) {
+        throw new Error(
+          `Quote version progression violation: Existing version is ${existingQuote.version}, revision must be ${existingQuote.version + 1}, got ${quote.version}`
+        );
+      }
+    } else if (quote.version !== 1) {
+      throw new Error(`Quote version violation: Initial quote must start at version 1, got ${quote.version}`);
+    }
+
     if (isSupabaseConfigured()) {
       // Executes single-transaction PostgreSQL RPC:
       // persist_quote_and_transition_request_atomic (quote + items + request status transition + audit)
@@ -341,6 +392,14 @@ export class LedgerEngine {
       );
     }
 
+    // Segregation of Duties: Requester cannot approve their own request
+    const req = await this.getRequestAsync(quote.requestId);
+    if (req && req.requesterId && req.requesterId === approval.approverId) {
+      throw new Error(
+        `Governance violation: Self-approval prohibited. Requester "${approval.approverId}" cannot approve their own procurement request.`
+      );
+    }
+
     if (isSupabaseConfigured()) {
       // Executes single-transaction PostgreSQL RPC:
       // persist_approval_and_transition_atomic (approval + quote status + request status + audit)
@@ -352,11 +411,11 @@ export class LedgerEngine {
     quote.status = approval.decision === 'approved' ? 'approved' : 'rejected';
     store.quotes.set(quote.id, quote);
 
-    const req = store.requests.get(quote.requestId);
-    if (req) {
-      req.status = approval.decision === 'approved' ? 'approved' : 'rejected';
-      req.updatedAt = new Date().toISOString();
-      store.requests.set(req.id, req);
+    const inMemoryReq = store.requests.get(quote.requestId);
+    if (inMemoryReq) {
+      inMemoryReq.status = approval.decision === 'approved' ? 'approved' : 'rejected';
+      inMemoryReq.updatedAt = new Date().toISOString();
+      store.requests.set(inMemoryReq.id, inMemoryReq);
     }
 
     const auditRecord: AuditEvent = {
@@ -568,6 +627,11 @@ export class LedgerEngine {
     const leaseExpiresAt = new Date(now + leaseSeconds * 1000).toISOString();
 
     if (existing) {
+      if (existing.signatureVerified && !rec.signatureVerified) {
+        throw new Error(
+          `Security violation: Cannot replace verified webhook event "${rec.eventId}" with an unverified payload.`
+        );
+      }
       if (existing.status === 'processed' || existing.status === 'duplicate') {
         return { claimed: false, status: 'duplicate', record: existing };
       }
@@ -662,6 +726,12 @@ export class LedgerEngine {
     if (webhookRecord.status === 'exhausted') {
       throw new Error(
         `Financial reconciliation failed: Webhook event "${webhookRecord.eventId}" is dead-lettered/exhausted.`
+      );
+    }
+
+    if (!webhookRecord.signatureVerified) {
+      throw new Error(
+        `Security violation: Webhook event "${webhookRecord.eventId}" signature is not verified. Financial reconciliation rejected.`
       );
     }
 

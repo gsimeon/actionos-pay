@@ -82,6 +82,7 @@ export async function POST(req: Request) {
     const batchSize = typeof body.batchSize === 'number' ? body.batchSize : 10;
     const leaseSeconds = typeof body.leaseSeconds === 'number' ? body.leaseSeconds : 60;
     const maxRetries = typeof body.maxRetries === 'number' ? body.maxRetries : 5;
+    const strict = body.strict === true;
 
     // 2. Execute Durable Recovery Worker
     const summary = await runWebhookRecoveryWorkerAsync({
@@ -90,10 +91,15 @@ export async function POST(req: Request) {
       maxRetries,
     });
 
-    return NextResponse.json({
-      ...summary,
-      message: `Recovery worker executed. Claimed: ${summary.claimedCount}, Processed: ${summary.processedCount}, Failed: ${summary.failedCount}, Dead-lettered: ${summary.deadLetteredCount}.`,
-    });
+    const statusCode = strict && (summary.failedCount > 0 || summary.deadLetteredCount > 0) ? 422 : 200;
+
+    return NextResponse.json(
+      {
+        ...summary,
+        message: `Recovery worker executed. Claimed: ${summary.claimedCount}, Processed: ${summary.processedCount}, Failed: ${summary.failedCount}, Dead-lettered: ${summary.deadLetteredCount}.`,
+      },
+      { status: statusCode }
+    );
   } catch (error: unknown) {
     console.error('Error in POST /api/paypal/webhook/recover:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';

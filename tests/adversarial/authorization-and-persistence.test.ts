@@ -220,7 +220,20 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         ...validQuote,
         id: 'quote-self-appr',
         requestId: 'req-self-appr',
+        subtotalCents: 80000,
+        taxCents: 4000,
+        shippingCents: 1000,
         totalCents: 85000, // $850.00 > $500 threshold
+        items: [
+          {
+            id: 'item-self-1',
+            quoteId: 'quote-self-appr',
+            itemName: 'Bundle',
+            quantity: 1,
+            unitPriceCents: 80000,
+            totalCents: 80000,
+          },
+        ],
       };
       selfQuote.checksumHash = computeQuoteChecksum({
         requestId: selfQuote.requestId,
@@ -255,7 +268,20 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       const bigQuote: Quote = {
         ...validQuote,
         id: 'quote-big-limit',
+        subtotalCents: 1800000,
+        taxCents: 150000,
+        shippingCents: 50000,
         totalCents: 2000000,
+        items: [
+          {
+            id: 'item-big-1',
+            quoteId: 'quote-big-limit',
+            itemName: 'Enterprise Workstations',
+            quantity: 2,
+            unitPriceCents: 900000,
+            totalCents: 1800000,
+          },
+        ],
       };
       bigQuote.checksumHash = computeQuoteChecksum({
         requestId: bigQuote.requestId,

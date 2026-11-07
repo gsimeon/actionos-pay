@@ -193,7 +193,7 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
 
   if (rpcErr) {
     throw new Error(
-      `Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003_financial_integrity_hardening.sql is applied. Fallback is prohibited to preserve transactional atomicity.`
+      `Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003/00004 is applied. Fallback is prohibited to preserve transactional atomicity.`
     );
   }
 
@@ -243,7 +243,7 @@ export async function persistApprovalToSupabase(
 
   if (rpcErr) {
     throw new Error(
-      `Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003_financial_integrity_hardening.sql is applied. Fallback is prohibited to preserve transactional atomicity.`
+      `Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003/00004 is applied. Fallback is prohibited to preserve transactional atomicity.`
     );
   }
 
