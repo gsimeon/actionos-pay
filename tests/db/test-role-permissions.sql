@@ -29,7 +29,9 @@ DECLARE
   v_other_approver_id UUID := '88888888-8888-4000-8000-000000000002'::UUID;
 
   v_supplier_id UUID := '22222222-2222-4000-8000-000000000001'::UUID;
+  v_other_supplier_id UUID := '22222222-2222-4000-8000-000000000099'::UUID;
   v_request_id UUID := '33333333-3333-4000-8000-000000000001'::UUID;
+  v_other_request_id UUID := '33333333-3333-4000-8000-000000000099'::UUID;
   v_quote_id UUID := '44444444-4444-4000-8000-000000000001'::UUID;
   v_other_quote_id UUID := '44444444-4444-4000-8000-000000000099'::UUID;
   v_payment_id UUID := '66666666-6666-4000-8000-000000000001'::UUID;
@@ -57,18 +59,22 @@ BEGIN
     (gen_random_uuid(), v_other_biz_id, v_other_approver_id, 'Rogue Approver', 'rogue@other.co', 'approver', 500000);
 
   INSERT INTO suppliers (id, business_id, name, code, is_approved, risk_rating, country)
-  VALUES (v_supplier_id, v_biz_id, 'Verified Supplier', 'SUP-VERIFIED', true, 'low', 'US');
+  VALUES
+    (v_supplier_id, v_biz_id, 'Verified Supplier', 'SUP-VERIFIED', true, 'low', 'US'),
+    (v_other_supplier_id, v_other_biz_id, 'Other Supplier', 'SUP-OTHER', true, 'low', 'US');
 
   INSERT INTO procurement_requests (id, business_id, requester_id, requester_name, raw_prompt, budget_limit_cents, currency, status)
-  VALUES (v_request_id, v_biz_id, v_requester_id, 'Amina Requester', 'Laptops', 200000, 'USD', 'draft');
+  VALUES
+    (v_request_id, v_biz_id, v_requester_id, 'Amina Requester', 'Laptops', 200000, 'USD', 'draft'),
+    (v_other_request_id, v_other_biz_id, v_other_approver_id, 'Rogue Approver', 'Rogue Request', 200000, 'USD', 'draft');
 
   INSERT INTO quotes (id, request_id, business_id, supplier_id, supplier_name, version, subtotal_cents, tax_cents, shipping_cents, total_cents, currency, checksum_hash, status, expires_at)
   VALUES
     (v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Verified Supplier', 1, 100000, 5000, 0, 105000, 'USD', 'hash-1', 'active', now() + INTERVAL '1 day'),
-    (v_other_quote_id, NULL, v_other_biz_id, v_supplier_id, 'Verified Supplier', 1, 50000, 2000, 0, 52000, 'USD', 'hash-other', 'active', now() + INTERVAL '1 day');
+    (v_other_quote_id, v_other_request_id, v_other_biz_id, v_other_supplier_id, 'Other Supplier', 1, 50000, 2000, 0, 52000, 'USD', 'hash-other', 'active', now() + INTERVAL '1 day');
 
   INSERT INTO payment_attempts (id, business_id, quote_id, amount_cents, currency, status)
-  VALUES (v_payment_id, v_biz_id, v_quote_id, 105000, 'USD', 'pending');
+  VALUES (v_payment_id, v_biz_id, v_quote_id, 105000, 'USD', 'created');
 
   INSERT INTO webhook_events (id, provider, event_id, event_type, payload, signature_verified, status)
   VALUES (v_webhook_id, 'paypal', 'EVT-ROLE-TEST-001', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "CAPT-ROLE-001"}'::jsonb, true, 'received');
@@ -407,8 +413,8 @@ $$;
 
 RESET ROLE;
 
-RAISE NOTICE '===============================================================';
-RAISE NOTICE '🎉 ALL POSTGRESQL ROLE SIMULATION TESTS PASSED 100%';
-RAISE NOTICE '===============================================================';
+\echo '==============================================================='
+\echo '🎉 ALL POSTGRESQL ROLE SIMULATION TESTS PASSED 100%'
+\echo '==============================================================='
 
 ROLLBACK;
