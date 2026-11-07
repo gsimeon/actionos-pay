@@ -297,27 +297,66 @@ export class LedgerEngine {
   static async saveApprovalAsync(approval: Approval): Promise<void> {
     const store = getStore();
 
-    // Look up quote to bind request ID for atomic transaction
+    if (!['approved', 'rejected'].includes(approval.decision)) {
+      throw new Error(
+        `Approval integrity violation: Invalid decision "${approval.decision}". Must be "approved" or "rejected".`
+      );
+    }
+
+    // Look up quote to bind request ID for atomic transaction and validate integrity
     const quote = await this.getQuoteAsync(approval.quoteId);
+    if (!quote) {
+      throw new Error(
+        `Approval integrity violation: Referenced quote "${approval.quoteId}" does not exist.`
+      );
+    }
+
+    if (quote.businessId !== approval.businessId) {
+      throw new Error(
+        `Tenant boundary violation: Quote business "${quote.businessId}" does not match approval "${approval.businessId}".`
+      );
+    }
+
+    if (approval.quoteVersion !== quote.version) {
+      throw new Error(
+        `Approval integrity violation: Approval quote version (${approval.quoteVersion}) does not match current quote version (${quote.version}).`
+      );
+    }
+
+    if (approval.approvedTotalCents !== quote.totalCents) {
+      throw new Error(
+        `Approval integrity violation: Approved total (${approval.approvedTotalCents} cents) does not match quote total (${quote.totalCents} cents).`
+      );
+    }
+
+    if (approval.approvedCurrency.toUpperCase() !== quote.currency.toUpperCase()) {
+      throw new Error(
+        `Approval integrity violation: Approved currency (${approval.approvedCurrency}) does not match quote currency (${quote.currency}).`
+      );
+    }
+
+    if (approval.approvedSupplierId && approval.approvedSupplierId !== quote.supplierId) {
+      throw new Error(
+        `Approval integrity violation: Approved supplier "${approval.approvedSupplierId}" does not match quote supplier "${quote.supplierId}".`
+      );
+    }
 
     if (isSupabaseConfigured()) {
       // Executes single-transaction PostgreSQL RPC:
       // persist_approval_and_transition_atomic (approval + quote status + request status + audit)
-      await persistApprovalToSupabase(approval, quote?.requestId);
+      await persistApprovalToSupabase(approval, quote.requestId);
     }
     store.approvals.set(approval.id, approval);
 
     // Update in-memory state
-    if (quote) {
-      quote.status = approval.decision === 'approved' ? 'approved' : 'rejected';
-      store.quotes.set(quote.id, quote);
+    quote.status = approval.decision === 'approved' ? 'approved' : 'rejected';
+    store.quotes.set(quote.id, quote);
 
-      const req = store.requests.get(quote.requestId);
-      if (req) {
-        req.status = approval.decision === 'approved' ? 'approved' : 'rejected';
-        req.updatedAt = new Date().toISOString();
-        store.requests.set(req.id, req);
-      }
+    const req = store.requests.get(quote.requestId);
+    if (req) {
+      req.status = approval.decision === 'approved' ? 'approved' : 'rejected';
+      req.updatedAt = new Date().toISOString();
+      store.requests.set(req.id, req);
     }
 
     const auditRecord: AuditEvent = {
@@ -610,6 +649,25 @@ export class LedgerEngine {
     if (payment.currency.toUpperCase() !== quote.currency.toUpperCase()) {
       throw new Error(
         `Financial integrity violation: Payment currency (${payment.currency}) does not match quote currency (${quote.currency}).`
+      );
+    }
+
+    // Validate Webhook Record Integrity
+    if (webhookRecord.provider !== 'paypal') {
+      throw new Error(
+        `Financial reconciliation failed: Webhook provider "${webhookRecord.provider}" is invalid (expected "paypal").`
+      );
+    }
+
+    if (webhookRecord.status === 'exhausted') {
+      throw new Error(
+        `Financial reconciliation failed: Webhook event "${webhookRecord.eventId}" is dead-lettered/exhausted.`
+      );
+    }
+
+    if (webhookRecord.businessId && webhookRecord.businessId !== payment.businessId) {
+      throw new Error(
+        `Tenant boundary error: Webhook businessId "${webhookRecord.businessId}" does not match payment "${payment.businessId}".`
       );
     }
 

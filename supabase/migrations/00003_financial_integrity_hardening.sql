@@ -12,6 +12,10 @@ ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0,
 ADD COLUMN IF NOT EXISTS last_error TEXT,
 ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
 
+-- Schema Evolution: Add active_quote_id to procurement_requests
+ALTER TABLE procurement_requests
+ADD COLUMN IF NOT EXISTS active_quote_id UUID;
+
 -- Function: reconcile_payment_capture_atomic
 -- Hardened atomic reconciliation with strict idempotency, relationship checks, and affected-row validation
 CREATE OR REPLACE FUNCTION reconcile_payment_capture_atomic(
@@ -33,6 +37,7 @@ DECLARE
   v_quote quotes%ROWTYPE;
   v_request procurement_requests%ROWTYPE;
   v_webhook webhook_events%ROWTYPE;
+  v_rows_affected INT;
 BEGIN
   -- 1. Lock and validate payment attempt
   SELECT * INTO v_payment FROM payment_attempts WHERE id = p_payment_id FOR UPDATE;
@@ -40,45 +45,13 @@ BEGIN
     RAISE EXCEPTION 'Financial reconciliation failed: Payment attempt % does not exist', p_payment_id;
   END IF;
 
-  -- 2. Strict Idempotency Check with Capture-ID Verification
-  IF v_payment.status = 'captured' THEN
-    IF v_payment.provider_capture_id IS DISTINCT FROM p_provider_capture_id THEN
-      RAISE EXCEPTION 'Financial reconciliation conflict: Payment % is already captured with different provider capture ID "%" (attempted: "%")',
-        p_payment_id, v_payment.provider_capture_id, p_provider_capture_id;
-    END IF;
-
-    -- Idempotent duplicate: ensure webhook is recorded as processed
-    UPDATE webhook_events
-    SET status = 'processed',
-        processed_at = COALESCE(processed_at, now()),
-        claim_lease_expires_at = NULL,
-        last_error = NULL
-    WHERE id = p_webhook_id;
-
-    -- Ensure procurement request is marked fulfilled
-    IF p_request_id IS NOT NULL THEN
-      UPDATE procurement_requests
-      SET status = 'fulfilled',
-          updated_at = now()
-      WHERE id = p_request_id;
-    END IF;
-
-    RETURN true;
-  END IF;
-
-  -- Verify payment status is in a valid state for capture
-  IF v_payment.status NOT IN ('created', 'pending') THEN
-    RAISE EXCEPTION 'Financial reconciliation failed: Payment % cannot be captured because status is "%"',
-      p_payment_id, v_payment.status;
-  END IF;
-
-  -- 3. Lock and validate quote
+  -- 2. Lock and validate quote
   SELECT * INTO v_quote FROM quotes WHERE id = p_quote_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Financial reconciliation failed: Referenced quote % does not exist', p_quote_id;
   END IF;
 
-  -- 4. Cross-Entity Relational Integrity & Tenant Boundary Checks
+  -- 3. Cross-Entity Relational Integrity & Tenant Boundary Checks
   IF v_payment.quote_id IS DISTINCT FROM p_quote_id THEN
     RAISE EXCEPTION 'Relational integrity violation: Payment quote ID % does not match expected %',
       v_payment.quote_id, p_quote_id;
@@ -94,7 +67,7 @@ BEGIN
       v_quote.business_id, p_business_id;
   END IF;
 
-  -- 5. Lock and validate procurement request if present
+  -- 4. Lock and validate procurement request if present
   IF p_request_id IS NOT NULL THEN
     IF v_quote.request_id IS DISTINCT FROM p_request_id THEN
       RAISE EXCEPTION 'Relational integrity violation: Quote request ID % does not match expected %',
@@ -110,6 +83,27 @@ BEGIN
       RAISE EXCEPTION 'Tenant boundary violation: Procurement request business ID % does not match expected %',
         v_request.business_id, p_business_id;
     END IF;
+  END IF;
+
+  -- 5. Lock and validate webhook event record
+  SELECT * INTO v_webhook FROM webhook_events WHERE id = p_webhook_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Webhook event record % does not exist', p_webhook_id;
+  END IF;
+
+  IF v_webhook.event_id IS DISTINCT FROM p_event_id THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Webhook event ID "%" does not match expected "%"',
+      v_webhook.event_id, p_event_id;
+  END IF;
+
+  IF v_webhook.provider IS DISTINCT FROM 'paypal' THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Webhook provider "%" is invalid (expected "paypal")',
+      v_webhook.provider;
+  END IF;
+
+  IF v_webhook.status NOT IN ('received', 'in_progress', 'retryable', 'processed') THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Webhook % is not in a reconcilable state (status: "%")',
+      p_webhook_id, v_webhook.status;
   END IF;
 
   -- 6. Minor Unit Financial Precision & Currency Equality Checks
@@ -133,20 +127,46 @@ BEGIN
       v_quote.currency, p_currency;
   END IF;
 
-  -- 7. Lock and validate webhook event record
-  SELECT * INTO v_webhook FROM webhook_events WHERE id = p_webhook_id FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Financial reconciliation failed: Webhook event record % does not exist', p_webhook_id;
+  -- 7. Strict Idempotency Check with Provider Capture ID Verification
+  -- (Executed only after complete entity, tenant, relationship, and amount validation)
+  IF v_payment.status = 'captured' THEN
+    IF v_payment.provider_capture_id IS DISTINCT FROM p_provider_capture_id THEN
+      RAISE EXCEPTION 'Financial reconciliation conflict: Payment % is already captured with different provider capture ID "%" (attempted: "%")',
+        p_payment_id, v_payment.provider_capture_id, p_provider_capture_id;
+    END IF;
+
+    -- Valid duplicate capture: ensure webhook is marked processed and request is fulfilled
+    UPDATE webhook_events
+    SET status = 'processed',
+        processed_at = COALESCE(processed_at, now()),
+        claim_lease_expires_at = NULL,
+        last_error = NULL
+    WHERE id = p_webhook_id;
+
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    IF v_rows_affected != 1 THEN
+      RAISE EXCEPTION 'Failed to update webhook event % on idempotent replay: expected 1 row, got %', p_webhook_id, v_rows_affected;
+    END IF;
+
+    IF p_request_id IS NOT NULL THEN
+      UPDATE procurement_requests
+      SET status = 'fulfilled',
+          updated_at = now()
+      WHERE id = p_request_id;
+
+      GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+      IF v_rows_affected != 1 THEN
+        RAISE EXCEPTION 'Failed to update procurement request % on idempotent replay: expected 1 row, got %', p_request_id, v_rows_affected;
+      END IF;
+    END IF;
+
+    RETURN true;
   END IF;
 
-  IF v_webhook.event_id IS DISTINCT FROM p_event_id THEN
-    RAISE EXCEPTION 'Financial reconciliation failed: Webhook event ID "%" does not match expected "%"',
-      v_webhook.event_id, p_event_id;
-  END IF;
-
-  IF v_webhook.status NOT IN ('received', 'in_progress', 'retryable') THEN
-    RAISE EXCEPTION 'Financial reconciliation failed: Webhook % is not in a reconcilable state (status: "%")',
-      p_webhook_id, v_webhook.status;
+  -- Verify payment status is in a valid state for capture
+  IF v_payment.status NOT IN ('created', 'pending') THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Payment % cannot be captured because status is "%"',
+      p_payment_id, v_payment.status;
   END IF;
 
   -- 8. Apply Transactional Updates & Validate Affected Rows
@@ -157,8 +177,9 @@ BEGIN
       updated_at = now()
   WHERE id = p_payment_id;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Failed to update payment attempt %', p_payment_id;
+  GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  IF v_rows_affected != 1 THEN
+    RAISE EXCEPTION 'Failed to update payment attempt %: expected 1 row, got %', p_payment_id, v_rows_affected;
   END IF;
 
   -- Update Webhook Event
@@ -169,8 +190,9 @@ BEGIN
       last_error = NULL
   WHERE id = p_webhook_id;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Failed to update webhook event %', p_webhook_id;
+  GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  IF v_rows_affected != 1 THEN
+    RAISE EXCEPTION 'Failed to update webhook event %: expected 1 row, got %', p_webhook_id, v_rows_affected;
   END IF;
 
   -- Transition Procurement Request
@@ -180,8 +202,9 @@ BEGIN
         updated_at = now()
     WHERE id = p_request_id;
 
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'Failed to update procurement request %', p_request_id;
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    IF v_rows_affected != 1 THEN
+      RAISE EXCEPTION 'Failed to update procurement request %: expected 1 row, got %', p_request_id, v_rows_affected;
     END IF;
   END IF;
 
@@ -321,7 +344,7 @@ END;
 $$;
 
 -- Function: persist_quote_and_transition_request_atomic
--- Atomically creates quote + items, transitions procurement request status to 'quoted', and records audit
+-- Atomically creates quote + items, transitions procurement request status to 'quoted', purges stale items on revision, and records audit
 CREATE OR REPLACE FUNCTION persist_quote_and_transition_request_atomic(
   p_quote JSONB,
   p_items JSONB,
@@ -333,8 +356,42 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_quote_id UUID := (p_quote->>'id')::UUID;
+  v_request procurement_requests%ROWTYPE;
+  v_rows_affected INT;
 BEGIN
-  -- 1. Insert or update quote
+  -- 1. Validate tenant consistency
+  IF (p_quote->>'business_id')::UUID IS DISTINCT FROM p_business_id THEN
+    RAISE EXCEPTION 'Tenant boundary violation: Quote business % does not match parameter business %',
+      p_quote->>'business_id', p_business_id;
+  END IF;
+
+  IF p_request_id IS NOT NULL AND (p_quote->>'request_id')::UUID IS DISTINCT FROM p_request_id THEN
+    RAISE EXCEPTION 'Relational integrity violation: Quote request ID % does not match expected %',
+      p_quote->>'request_id', p_request_id;
+  END IF;
+
+  -- 2. Lock and validate procurement request if present
+  IF p_request_id IS NOT NULL THEN
+    SELECT * INTO v_request FROM procurement_requests WHERE id = p_request_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Referenced procurement request % does not exist', p_request_id;
+    END IF;
+
+    IF v_request.business_id IS DISTINCT FROM p_business_id THEN
+      RAISE EXCEPTION 'Tenant boundary violation: Procurement request business % does not match %',
+        v_request.business_id, p_business_id;
+    END IF;
+
+    IF v_request.status NOT IN ('open', 'quoted', 'draft') THEN
+      RAISE EXCEPTION 'Invalid state transition: Procurement request % is in status "%" which cannot receive quotes',
+        p_request_id, v_request.status;
+    END IF;
+  END IF;
+
+  -- 3. Prevent stale items on revision: purge existing quote items before inserting new ones
+  DELETE FROM quote_items WHERE quote_id = v_quote_id;
+
+  -- 4. Insert or update quote
   INSERT INTO quotes (
     id, request_id, business_id, supplier_id, supplier_name,
     version, subtotal_cents, tax_cents, shipping_cents, total_cents,
@@ -342,7 +399,7 @@ BEGIN
   ) VALUES (
     v_quote_id,
     (p_quote->>'request_id')::UUID,
-    (p_quote->>'business_id')::UUID,
+    p_business_id,
     (p_quote->>'supplier_id')::UUID,
     p_quote->>'supplier_name',
     (p_quote->>'version')::INT,
@@ -366,7 +423,7 @@ BEGIN
     status = EXCLUDED.status,
     expires_at = EXCLUDED.expires_at;
 
-  -- 2. Insert quote items
+  -- 5. Insert quote items
   IF p_items IS NOT NULL AND jsonb_array_length(p_items) > 0 THEN
     INSERT INTO quote_items (id, quote_id, product_id, item_name, sku, quantity, unit_price_cents, total_cents)
     SELECT
@@ -378,14 +435,10 @@ BEGIN
       (item->>'quantity')::INT,
       (item->>'unit_price_cents')::BIGINT,
       (item->>'total_cents')::BIGINT
-    FROM jsonb_array_elements(p_items) AS item
-    ON CONFLICT (id) DO UPDATE SET
-      quantity = EXCLUDED.quantity,
-      unit_price_cents = EXCLUDED.unit_price_cents,
-      total_cents = EXCLUDED.total_cents;
+    FROM jsonb_array_elements(p_items) AS item;
   END IF;
 
-  -- 3. Atomically transition procurement request status to 'quoted' and bind active quote
+  -- 6. Atomically transition procurement request status to 'quoted' and bind active quote
   IF p_request_id IS NOT NULL THEN
     UPDATE procurement_requests
     SET status = 'quoted',
@@ -394,12 +447,13 @@ BEGIN
     WHERE id = p_request_id
       AND business_id = p_business_id;
 
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'Referenced procurement request % not found for business %', p_request_id, p_business_id;
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    IF v_rows_affected != 1 THEN
+      RAISE EXCEPTION 'Failed to update procurement request %: expected 1 row, got %', p_request_id, v_rows_affected;
     END IF;
   END IF;
 
-  -- 4. Record transactional audit event
+  -- 7. Record transactional audit event
   INSERT INTO audit_events (
     id, business_id, entity_type, entity_id, actor_id, actor_role, action, payload, created_at
   ) VALUES (
@@ -425,6 +479,7 @@ $$;
 
 -- Function: persist_approval_and_transition_atomic
 -- Atomically persists approval record, updates quote and request status, and records audit trail
+-- Enforces complete database-level financial integrity, supplier, quote version, and relational constraints
 CREATE OR REPLACE FUNCTION persist_approval_and_transition_atomic(
   p_approval JSONB,
   p_quote_id UUID,
@@ -437,10 +492,96 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_approval_id UUID := (p_approval->>'id')::UUID;
+  v_quote quotes%ROWTYPE;
+  v_request procurement_requests%ROWTYPE;
   v_quote_status TEXT := p_decision;
   v_request_status TEXT := p_decision;
+  v_rows_affected INT;
 BEGIN
-  -- 1. Insert approval record
+  -- 1. Validate decision value
+  IF p_decision NOT IN ('approved', 'rejected') THEN
+    RAISE EXCEPTION 'Approval integrity violation: Invalid decision "%". Must be "approved" or "rejected"', p_decision;
+  END IF;
+
+  IF (p_approval->>'decision') IS DISTINCT FROM p_decision THEN
+    RAISE EXCEPTION 'Approval integrity violation: Payload decision "%" does not match transition decision "%"',
+      p_approval->>'decision', p_decision;
+  END IF;
+
+  -- 2. Lock and validate quote
+  SELECT * INTO v_quote FROM quotes WHERE id = p_quote_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Approval integrity violation: Referenced quote % does not exist', p_quote_id;
+  END IF;
+
+  IF v_quote.business_id IS DISTINCT FROM p_business_id THEN
+    RAISE EXCEPTION 'Tenant boundary violation: Quote business % does not match approval business %',
+      v_quote.business_id, p_business_id;
+  END IF;
+
+  IF (p_approval->>'quote_id')::UUID IS DISTINCT FROM p_quote_id THEN
+    RAISE EXCEPTION 'Approval integrity violation: Payload quote ID % does not match expected quote %',
+      p_approval->>'quote_id', p_quote_id;
+  END IF;
+
+  IF (p_approval->>'business_id')::UUID IS DISTINCT FROM p_business_id THEN
+    RAISE EXCEPTION 'Tenant boundary violation: Payload business ID % does not match expected %',
+      p_approval->>'business_id', p_business_id;
+  END IF;
+
+  -- 3. Verify quote version match
+  IF (p_approval->>'quote_version')::INT IS DISTINCT FROM v_quote.version THEN
+    RAISE EXCEPTION 'Approval integrity violation: Approval quote version % does not match current quote version %',
+      p_approval->>'quote_version', v_quote.version;
+  END IF;
+
+  -- 4. Verify approved amount and currency match quote
+  IF (p_approval->>'approved_total_cents')::BIGINT != v_quote.total_cents THEN
+    RAISE EXCEPTION 'Approval integrity violation: Approved amount % cents does not match quote total % cents',
+      (p_approval->>'approved_total_cents')::BIGINT, v_quote.total_cents;
+  END IF;
+
+  IF UPPER(p_approval->>'approved_currency') != UPPER(v_quote.currency) THEN
+    RAISE EXCEPTION 'Approval integrity violation: Approved currency "%" does not match quote currency "%"',
+      p_approval->>'approved_currency', v_quote.currency;
+  END IF;
+
+  -- 5. Verify approved supplier matches quote
+  IF (p_approval->>'approved_supplier_id')::UUID IS DISTINCT FROM v_quote.supplier_id THEN
+    RAISE EXCEPTION 'Approval integrity violation: Approved supplier ID % does not match quote supplier %',
+      p_approval->>'approved_supplier_id', v_quote.supplier_id;
+  END IF;
+
+  -- 6. Verify quote is in a state eligible for approval
+  IF v_quote.status NOT IN ('active', 'pending_approval', 'quoted') THEN
+    RAISE EXCEPTION 'Invalid state transition: Quote % is in status "%" which cannot be transitioned by approval',
+      p_quote_id, v_quote.status;
+  END IF;
+
+  -- 7. Lock and validate procurement request if present
+  IF p_request_id IS NOT NULL THEN
+    IF v_quote.request_id IS DISTINCT FROM p_request_id THEN
+      RAISE EXCEPTION 'Relational integrity violation: Quote request ID % does not match expected %',
+        v_quote.request_id, p_request_id;
+    END IF;
+
+    SELECT * INTO v_request FROM procurement_requests WHERE id = p_request_id FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Approval integrity violation: Referenced procurement request % does not exist', p_request_id;
+    END IF;
+
+    IF v_request.business_id IS DISTINCT FROM p_business_id THEN
+      RAISE EXCEPTION 'Tenant boundary violation: Procurement request business % does not match %',
+        v_request.business_id, p_business_id;
+    END IF;
+
+    IF v_request.status NOT IN ('open', 'quoted', 'pending_approval', 'draft') THEN
+      RAISE EXCEPTION 'Invalid state transition: Procurement request % is in status "%" which cannot be transitioned by approval',
+        p_request_id, v_request.status;
+    END IF;
+  END IF;
+
+  -- 8. Insert approval record
   INSERT INTO approvals (
     id, quote_id, business_id, approver_id, approver_name, approver_role,
     quote_version, approved_total_cents, approved_currency, approved_supplier_id,
@@ -462,17 +603,18 @@ BEGIN
     (p_approval->>'created_at')::TIMESTAMPTZ
   );
 
-  -- 2. Atomically update quote status
+  -- 9. Atomically update quote status
   UPDATE quotes
   SET status = v_quote_status
   WHERE id = p_quote_id
     AND business_id = p_business_id;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Referenced quote % not found for business %', p_quote_id, p_business_id;
+  GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  IF v_rows_affected != 1 THEN
+    RAISE EXCEPTION 'Failed to update quote %: expected 1 row, got %', p_quote_id, v_rows_affected;
   END IF;
 
-  -- 3. Atomically update procurement request status
+  -- 10. Atomically update procurement request status
   IF p_request_id IS NOT NULL THEN
     UPDATE procurement_requests
     SET status = v_request_status,
@@ -480,12 +622,13 @@ BEGIN
     WHERE id = p_request_id
       AND business_id = p_business_id;
 
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'Referenced procurement request % not found for business %', p_request_id, p_business_id;
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    IF v_rows_affected != 1 THEN
+      RAISE EXCEPTION 'Failed to update procurement request %: expected 1 row, got %', p_request_id, v_rows_affected;
     END IF;
   END IF;
 
-  -- 4. Record transactional audit event
+  -- 11. Record transactional audit event
   INSERT INTO audit_events (
     id, business_id, entity_type, entity_id, actor_id, actor_role, action, payload, created_at
   ) VALUES (

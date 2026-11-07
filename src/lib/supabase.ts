@@ -192,24 +192,8 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
   });
 
   if (rpcErr) {
-    if (
-      rpcErr.message?.includes('persist_quote_and_transition_request_atomic') ||
-      rpcErr.code === 'PGRST202'
-    ) {
-      // Backward-compatible fallback to create_quote_atomic if forward migration not yet applied
-      const { error: legacyErr } = await supabase.rpc('create_quote_atomic', {
-        p_quote: quotePayload,
-        p_items: itemsPayload,
-      });
-      if (legacyErr) {
-        throw new Error(
-          `Transactional quote persistence failed (create_quote_atomic): ${legacyErr.message} (${legacyErr.code})`
-        );
-      }
-      return true;
-    }
     throw new Error(
-      `Transactional quote persistence failed (persist_quote_and_transition_request_atomic): ${rpcErr.message} (${rpcErr.code})`
+      `Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003_financial_integrity_hardening.sql is applied. Fallback is prohibited to preserve transactional atomicity.`
     );
   }
 
@@ -258,19 +242,8 @@ export async function persistApprovalToSupabase(
   });
 
   if (rpcErr) {
-    if (
-      rpcErr.message?.includes('persist_approval_and_transition_atomic') ||
-      rpcErr.code === 'PGRST202'
-    ) {
-      // Backward-compatible fallback to direct insert if forward migration not yet applied
-      const { error } = await supabase.from('approvals').insert(approvalPayload);
-      if (error) {
-        throw new Error(`Supabase approval persistence failed: ${error.message} (${error.code})`);
-      }
-      return true;
-    }
     throw new Error(
-      `Transactional approval persistence failed (persist_approval_and_transition_atomic): ${rpcErr.message} (${rpcErr.code})`
+      `Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed: ${rpcErr.message} (${rpcErr.code}). Ensure forward migration 00003_financial_integrity_hardening.sql is applied. Fallback is prohibited to preserve transactional atomicity.`
     );
   }
 

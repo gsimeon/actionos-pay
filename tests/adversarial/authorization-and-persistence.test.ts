@@ -19,6 +19,7 @@ import { Quote, ProcurementRequest, PaymentAttempt, Approval, WebhookEventRecord
 import {
   persistRequestToSupabase,
   persistQuoteToSupabase,
+  persistApprovalToSupabase,
   claimWebhookEventInSupabase,
   reconcilePaymentCaptureInSupabase,
   claimExpiredWebhookEventsInSupabase,
@@ -532,7 +533,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         approverName: approverMember.userName,
         approverRole: 'approver',
         quoteVersion: 1,
-        approvedTotalCents: 500, // Forged total!
+        approvedTotalCents: validQuote.totalCents,
         approvedCurrency: 'USD',
         approvedSupplierId: validQuote.supplierId,
         decision: 'approved',
@@ -1513,18 +1514,28 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       }
     });
 
-    it('verifies /api/paypal/webhook/recover GET returns metrics and POST executes worker', async () => {
-      // 1. GET metrics
-      const getRes = await getRecoverRoute();
-      expect(getRes.status).toBe(200);
-      const getJson = await getRes.json();
-      expect(getJson.success).toBe(true);
-      expect(getJson.metrics).toBeDefined();
+    it('verifies /api/paypal/webhook/recover GET returns metrics (secured) and POST executes worker', async () => {
+      // 1. Unauthenticated GET is rejected with 401
+      const unauthReq = new Request('http://localhost/api/paypal/webhook/recover', { method: 'GET' });
+      const unauthRes = await getRecoverRoute(unauthReq);
+      expect(unauthRes.status).toBe(401);
 
-      // 2. POST execution with CRON_SECRET
+      // 2. Authenticated GET with CRON_SECRET succeeds
       const oldCron = process.env.CRON_SECRET;
       try {
         process.env.CRON_SECRET = 'secret-cron-token-12345';
+
+        const authReq = new Request('http://localhost/api/paypal/webhook/recover', {
+          method: 'GET',
+          headers: { 'x-cron-secret': 'secret-cron-token-12345' },
+        });
+        const getRes = await getRecoverRoute(authReq);
+        expect(getRes.status).toBe(200);
+        const getJson = await getRes.json();
+        expect(getJson.success).toBe(true);
+        expect(getJson.metrics).toBeDefined();
+
+        // 3. POST execution with CRON_SECRET
         const postReq = new Request('http://localhost/api/paypal/webhook/recover', {
           method: 'POST',
           headers: {
@@ -1677,6 +1688,314 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
 
       const updatedReq = await LedgerEngine.getRequestAsync(reqId);
       expect(updatedReq?.status).toBe('approved');
+    });
+  });
+
+  describe('Phase 7: Production Acceptance, SQL Idempotency Hardening & Approval Integrity', () => {
+    it('rejects approval when decision is not "approved" or "rejected"', async () => {
+      const invalidDecisionApproval = {
+        id: 'appr-bad-decision',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver' as const,
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'pending' as any,
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(invalidDecisionApproval)).rejects.toThrow(
+        /Approval integrity violation: Invalid decision/
+      );
+    });
+
+    it('rejects approval when approved total cents does not match quote total', async () => {
+      const mismatchedAmountApproval: Approval = {
+        id: 'appr-mismatched-amount',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents + 1000,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(mismatchedAmountApproval)).rejects.toThrow(
+        /Approval integrity violation: Approved total/
+      );
+    });
+
+    it('rejects approval when quote version does not match current quote version', async () => {
+      const mismatchedVersionApproval: Approval = {
+        id: 'appr-mismatched-ver',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version + 1,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(mismatchedVersionApproval)).rejects.toThrow(
+        /Approval integrity violation: Approval quote version/
+      );
+    });
+
+    it('rejects approval when approved currency does not match quote currency', async () => {
+      const mismatchedCurrencyApproval: Approval = {
+        id: 'appr-mismatched-curr',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: 'EUR',
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(mismatchedCurrencyApproval)).rejects.toThrow(
+        /Approval integrity violation: Approved currency/
+      );
+    });
+
+    it('rejects approval when approved supplier ID does not match quote supplier', async () => {
+      const mismatchedSupplierApproval: Approval = {
+        id: 'appr-mismatched-supp',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: 'supplier-different-id',
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(mismatchedSupplierApproval)).rejects.toThrow(
+        /Approval integrity violation: Approved supplier/
+      );
+    });
+
+    it('rejects approval when tenant business ID does not match quote business', async () => {
+      const mismatchedTenantApproval: Approval = {
+        id: 'appr-mismatched-biz',
+        quoteId: validQuote.id,
+        businessId: 'different-tenant-uuid-123',
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(LedgerEngine.saveApprovalAsync(mismatchedTenantApproval)).rejects.toThrow(
+        /Tenant boundary violation/
+      );
+    });
+
+    it('rejects payment reconciliation when webhook provider is not paypal', async () => {
+      const payment: PaymentAttempt = {
+        id: 'pay-provider-test-1',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        provider: 'paypal',
+        amountCents: validQuote.totalCents,
+        currency: validQuote.currency,
+        status: 'created',
+        idempotencyKey: 'idem-prov-1',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const invalidWebhook: WebhookEventRecord = {
+        id: 'wh-bad-prov',
+        provider: 'stripe' as any,
+        eventId: 'EVT-STRIPE-1',
+        eventType: 'charge.succeeded',
+        signatureVerified: true,
+        payload: {},
+        status: 'received',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(
+        LedgerEngine.reconcilePaymentCaptureAsync({
+          payment,
+          webhookRecord: invalidWebhook,
+          quote: validQuote,
+          providerCaptureId: 'CAP-TEST-1',
+        })
+      ).rejects.toThrow(/Webhook provider "stripe" is invalid/);
+    });
+
+    it('rejects payment reconciliation when webhook is in dead-lettered/exhausted state', async () => {
+      const payment: PaymentAttempt = {
+        id: 'pay-exhausted-test-1',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        provider: 'paypal',
+        amountCents: validQuote.totalCents,
+        currency: validQuote.currency,
+        status: 'created',
+        idempotencyKey: 'idem-exh-1',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const exhaustedWebhook: WebhookEventRecord = {
+        id: 'wh-exhausted',
+        provider: 'paypal',
+        eventId: 'EVT-EXH-1',
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: {},
+        status: 'exhausted',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(
+        LedgerEngine.reconcilePaymentCaptureAsync({
+          payment,
+          webhookRecord: exhaustedWebhook,
+          quote: validQuote,
+          providerCaptureId: 'CAP-TEST-1',
+        })
+      ).rejects.toThrow(/dead-lettered\/exhausted/);
+    });
+
+    it('rejects idempotent replay if quote ID does not match even if payment is already captured', async () => {
+      const payment: PaymentAttempt = {
+        id: 'pay-idem-mismatch-1',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        provider: 'paypal',
+        amountCents: validQuote.totalCents,
+        currency: validQuote.currency,
+        status: 'captured',
+        providerCaptureId: 'CAP-SAME-1',
+        idempotencyKey: 'idem-cap-1',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const foreignQuote: Quote = {
+        ...validQuote,
+        id: 'quote-foreign-999',
+      };
+      const webhook: WebhookEventRecord = {
+        id: 'wh-idem-1',
+        provider: 'paypal',
+        eventId: 'EVT-IDEM-1',
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: {},
+        status: 'received',
+        createdAt: new Date().toISOString(),
+      };
+      await expect(
+        LedgerEngine.reconcilePaymentCaptureAsync({
+          payment,
+          webhookRecord: webhook,
+          quote: foreignQuote,
+          providerCaptureId: 'CAP-SAME-1',
+        })
+      ).rejects.toThrow(/Payment quoteId .* does not match quote/);
+    });
+
+    it('strictly fails closed with DatabaseCompatibilityError in persistQuoteToSupabase when RPC fails (no fallback)', async () => {
+      const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      try {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-supabase-project.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key-that-will-fail-network-call-32chars';
+        resetSupabaseClientForTesting();
+
+        await expect(persistQuoteToSupabase(validQuote)).rejects.toThrow(
+          /Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed|Supabase is configured in environment but client failed to initialize/
+        );
+      } finally {
+        if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        resetSupabaseClientForTesting();
+      }
+    });
+
+    it('strictly fails closed with DatabaseCompatibilityError in persistApprovalToSupabase when RPC fails (no fallback)', async () => {
+      const oldUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const testApproval: Approval = {
+        id: 'appr-compat-test',
+        quoteId: validQuote.id,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+      try {
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-supabase-project.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'fake-service-role-key-that-will-fail-network-call-32chars';
+        resetSupabaseClientForTesting();
+
+        await expect(persistApprovalToSupabase(testApproval, validQuote.requestId)).rejects.toThrow(
+          /Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed|Supabase is configured in environment but client failed to initialize/
+        );
+      } finally {
+        if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (oldKey) process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+        else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        resetSupabaseClientForTesting();
+      }
+    });
+
+    it('verifies /api/paypal/webhook/recover GET accepts MONITORING_SECRET bearer token', async () => {
+      const oldMonitoring = process.env.MONITORING_SECRET;
+      try {
+        process.env.MONITORING_SECRET = 'monitor-bearer-token-12345';
+        const req = new Request('http://localhost/api/paypal/webhook/recover', {
+          method: 'GET',
+          headers: {
+            Authorization: 'Bearer monitor-bearer-token-12345',
+          },
+        });
+        const res = await getRecoverRoute(req);
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.success).toBe(true);
+        expect(json.metrics).toBeDefined();
+      } finally {
+        if (oldMonitoring) process.env.MONITORING_SECRET = oldMonitoring;
+        else delete process.env.MONITORING_SECRET;
+      }
     });
   });
 });
