@@ -6,7 +6,7 @@
  * Usage: npx tsx scripts/verify-paypal-sandbox.ts
  */
 
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -44,9 +44,10 @@ async function runVerification() {
 
   const creds = getPayPalCredentials();
   if (!creds || creds.clientId.startsWith('your-') || creds.clientSecret.startsWith('your-')) {
-    console.warn('⚠️  No live PayPal Sandbox credentials found in environment.');
-    console.log('Please set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env.local or CI secrets.');
-    process.exit(0);
+    console.error('❌ Live PayPal Sandbox Acceptance Gate Failed: Missing live credentials.');
+    console.error('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are strictly required for live PayPal Sandbox verification.');
+    console.error('Set live credentials in .env.local or CI repository secrets before invoking verify:sandbox.');
+    process.exit(1);
   }
 
   console.log(`[1/4] Client ID: ${creds.clientId.slice(0, 8)}... (Environment: ${creds.env})`);
@@ -58,9 +59,9 @@ async function runVerification() {
 
   // Step 2: Build Sealed Quote & Approval
   console.log('[3/4] Generating cryptographically-sealed quote and HMAC approval...');
-  process.env.APPROVAL_SIGNING_SECRET =
-    process.env.APPROVAL_SIGNING_SECRET ||
-    'actionos-production-approval-signing-hmac-secret-super-key-2026';
+  if (!process.env.APPROVAL_SIGNING_SECRET) {
+    process.env.APPROVAL_SIGNING_SECRET = randomBytes(32).toString('hex');
+  }
 
   const testRequestId = randomUUID();
   const testQuoteId = randomUUID();

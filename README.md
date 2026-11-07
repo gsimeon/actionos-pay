@@ -48,7 +48,7 @@ Requirements: Node.js 20.9+ and npm.
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (99/99 passing)
+# 2. Run automated test suites (101/101 passing)
 npm test
 
 # 3. Run live PayPal Sandbox E2E tests
@@ -67,8 +67,8 @@ Open [http://localhost:3000](http://localhost:3000) to access the interactive Pr
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 99 tests.
-3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` -> `00002` -> `00003` -> `00004`, and executes `tests/db/test-migrations-and-rpcs.sql` to verify live stored procedures, transactional constraints, and rollback behaviors.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 101 tests.
+3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` -> `00002` -> `00003` -> `00004` -> `00005`, and executes `tests/db/test-migrations-and-rpcs.sql` to verify 20 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), lease contention, and rollback behaviors.
 4. **Next.js Production Build Gate**: Clean production compilation with standalone bundle validation (`next build`).
 
 ## Scheduled Webhook Recovery Automation
