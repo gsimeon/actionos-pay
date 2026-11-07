@@ -790,6 +790,20 @@ $$;
 -- SQL FUNCTION SECURITY & PRIVILEGE LOCKDOWN (Least Privilege Principle)
 -- =========================================================================================
 
+-- Compatibility: Ensure Supabase roles exist on standalone PostgreSQL environments
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOLOGIN;
+  END IF;
+END $$;
+
 -- 1. Revoke all execution privileges from untrusted roles (PUBLIC and anon)
 REVOKE ALL ON FUNCTION auth_user_business_ids() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION persist_quote_and_transition_request_atomic(JSONB, JSONB, UUID, UUID) FROM PUBLIC, anon;
