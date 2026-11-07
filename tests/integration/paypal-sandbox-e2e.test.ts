@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import {
   getPayPalCredentials,
   getAccessToken,
   createPayPalOrder,
+  capturePayPalOrder,
   verifyWebhookSignature,
 } from '@/lib/paypal-service';
 import { computeApprovalSignature } from '@/lib/approval-engine';
@@ -83,9 +84,9 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
     createdAt: new Date().toISOString(),
   };
 
-  process.env.APPROVAL_SIGNING_SECRET =
-    process.env.APPROVAL_SIGNING_SECRET ||
-    'actionos-production-approval-signing-hmac-secret-super-key-2026';
+  if (!process.env.APPROVAL_SIGNING_SECRET) {
+    process.env.APPROVAL_SIGNING_SECRET = randomBytes(32).toString('hex');
+  }
 
   const validSignature = computeApprovalSignature({
     quoteId: testQuote.id,
@@ -176,20 +177,65 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
 
       expect(order1.orderId).toBe(order2.orderId);
     });
-  } else {
-    it('notifies runner that live PayPal credentials are not present and verifies mock contract', async () => {
-      console.log(
-        'PayPal Sandbox Credentials not detected in environment. Running simulated contract verification.'
-      );
-      process.env.PAYPAL_ALLOW_SIMULATION = 'true';
+
+    it('demonstrates live unapproved capture failure handling (ORDER_NOT_APPROVED) with guidance', async () => {
+      // Create a fresh live order that has not yet been approved by buyer in sandbox UI
       const orderResult = await createPayPalOrder({
         quote: testQuote,
         approval: testApproval,
+        idempotencyKey: randomUUID(),
       });
 
-      expect(orderResult.isSimulated).toBe(true);
-      expect(orderResult.orderId).toMatch(/^SIM-/);
-      expect(orderResult.status).toBe('CREATED');
+      // Attempting to capture an order that is not yet buyer-approved returns FAILED with ORDER_NOT_APPROVED
+      const captureResult = await capturePayPalOrder({
+        orderId: orderResult.orderId,
+        paymentAttempt: orderResult.paymentAttempt,
+      });
+
+      expect(captureResult.status).toBe('FAILED');
+      expect(captureResult.isSimulated).toBe(false);
+      expect(captureResult.errorMessage).toContain('ORDER_NOT_APPROVED');
     });
+
+    it('verifies live webhook signature validation engine rejects spoofed headers', async () => {
+      process.env.PAYPAL_WEBHOOK_ID = 'WH-SANDBOX-TEST-ID';
+      const fakeHeaders = {
+        'paypal-auth-algo': 'SHA256withRSA',
+        // Missing required cert-url and transmission-sig
+        'paypal-transmission-id': 'test-trans-id-1',
+      };
+
+      const result = await verifyWebhookSignature({
+        headers: fakeHeaders,
+        body: JSON.stringify({ id: 'EVT-TEST', event_type: 'PAYMENT.CAPTURE.COMPLETED' }),
+      });
+
+      expect(result.verified).toBe(false);
+      expect(result.reason).toContain('Missing required PayPal signature verification headers');
+    });
+  } else {
+    const isStrictSandboxRun =
+      process.env.npm_lifecycle_event === 'test:sandbox' ||
+      process.env.STRICT_SANDBOX === 'true';
+
+    if (isStrictSandboxRun) {
+      it('strictly requires live PayPal Sandbox credentials when executed in sandbox mode', () => {
+        throw new Error(
+          'Live PayPal Sandbox Acceptance Failed: PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are required. Simulated fallback is strictly prohibited in live sandbox acceptance mode.'
+        );
+      });
+    } else {
+      it('isolates simulated contract test when credentials are not configured in general CI test run', async () => {
+        process.env.PAYPAL_ALLOW_SIMULATION = 'true';
+        const orderResult = await createPayPalOrder({
+          quote: testQuote,
+          approval: testApproval,
+        });
+
+        expect(orderResult.isSimulated).toBe(true);
+        expect(orderResult.orderId).toMatch(/^SIM-/);
+        expect(orderResult.status).toBe('CREATED');
+      });
+    }
   }
 });
