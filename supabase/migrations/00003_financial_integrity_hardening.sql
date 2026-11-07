@@ -12,6 +12,10 @@ ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0,
 ADD COLUMN IF NOT EXISTS last_error TEXT,
 ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
 
+-- Schema Evolution: Add active_quote_id to procurement_requests
+ALTER TABLE procurement_requests
+ADD COLUMN IF NOT EXISTS active_quote_id UUID;
+
 -- Function: reconcile_payment_capture_atomic
 -- Hardened atomic reconciliation with strict idempotency, relationship checks, and affected-row validation
 CREATE OR REPLACE FUNCTION reconcile_payment_capture_atomic(
