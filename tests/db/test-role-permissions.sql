@@ -70,7 +70,7 @@ BEGIN
 
   INSERT INTO quotes (id, request_id, business_id, supplier_id, supplier_name, version, subtotal_cents, tax_cents, shipping_cents, total_cents, currency, checksum_hash, status, expires_at)
   VALUES
-    (v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Verified Supplier', 1, 100000, 5000, 0, 105000, 'USD', 'hash-1', 'active', now() + INTERVAL '1 day'),
+    (v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Verified Supplier', 1, 100000, 5000, 0, 105000, 'USD', 'hash-1', 'approved', now() + INTERVAL '1 day'),
     (v_other_quote_id, v_other_request_id, v_other_biz_id, v_other_supplier_id, 'Other Supplier', 1, 50000, 2000, 0, 52000, 'USD', 'hash-other', 'active', now() + INTERVAL '1 day');
 
   INSERT INTO payment_attempts (id, quote_id, business_id, provider, amount_cents, currency, status, idempotency_key)
@@ -88,6 +88,7 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+ALTER ROLE service_role BYPASSRLS;
 
 -- =============================================================================
 -- 1. ROLE TEST: anon (Untrusted anonymous caller)

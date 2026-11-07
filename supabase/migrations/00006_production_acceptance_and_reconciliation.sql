@@ -594,6 +594,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     CREATE ROLE service_role NOLOGIN;
   END IF;
+  ALTER ROLE service_role BYPASSRLS;
 END $$;
 
 -- 1. Revoke all execution privileges from untrusted roles (PUBLIC and anon)
