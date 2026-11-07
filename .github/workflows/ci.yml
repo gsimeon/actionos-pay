@@ -93,6 +93,8 @@ jobs:
         env:
           PGPASSWORD: test_password
         run: |
+          echo "Initializing Supabase auth compatibility schema..."
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -c "CREATE SCHEMA IF NOT EXISTS auth; CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID AS \$\$ SELECT '00000000-0000-4000-8000-000000000001'::UUID; \$\$ LANGUAGE sql STABLE;"
           echo "Applying 00001_initial_schema.sql..."
           psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00001_initial_schema.sql
           echo "Applying 00002_atomic_reconciliation.sql..."
