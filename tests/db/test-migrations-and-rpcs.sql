@@ -112,7 +112,7 @@ BEGIN
 
   v_caught_exception := false;
   BEGIN
-    PERFORM persist_approval_and_transition_atomic(v_approval_json, v_quote_id, v_request_id, v_biz_id, 'approved');
+    PERFORM persist_approval_and_transition_atomic(v_approval_json, v_quote_id, v_request_id, v_biz_id, 'approved'::TEXT);
   EXCEPTION WHEN OTHERS THEN
     v_caught_exception := true;
   END;
@@ -122,7 +122,7 @@ BEGIN
 
   -- 4B: Valid Approval Persistence
   v_approval_json := jsonb_set(v_approval_json, '{approved_total_cents}', '225000');
-  PERFORM persist_approval_and_transition_atomic(v_approval_json, v_quote_id, v_request_id, v_biz_id, 'approved');
+  PERFORM persist_approval_and_transition_atomic(v_approval_json, v_quote_id, v_request_id, v_biz_id, 'approved'::TEXT);
 
   SELECT status INTO v_quote_status FROM quotes WHERE id = v_quote_id;
   SELECT status INTO v_req_status FROM procurement_requests WHERE id = v_request_id;
@@ -140,14 +140,14 @@ BEGIN
   -- 6. Test Atomic Payment Reconciliation
   PERFORM reconcile_payment_capture_atomic(
     v_payment_id,
-    'CAPTURE-12345',
+    'CAPTURE-12345'::TEXT,
     v_webhook_id,
     v_quote_id,
     v_request_id,
     v_biz_id,
-    225000,
-    'USD',
-    'EVT-PAYPAL-1'
+    225000::BIGINT,
+    'USD'::TEXT,
+    'EVT-PAYPAL-1'::TEXT
   );
 
   SELECT status INTO v_req_status FROM procurement_requests WHERE id = v_request_id;
@@ -161,14 +161,14 @@ BEGIN
   BEGIN
     PERFORM reconcile_payment_capture_atomic(
       v_payment_id,
-      'CAPTURE-WRONG-999',
+      'CAPTURE-WRONG-999'::TEXT,
       v_webhook_id,
       v_quote_id,
       v_request_id,
       v_biz_id,
-      225000,
-      'USD',
-      'EVT-PAYPAL-1'
+      225000::BIGINT,
+      'USD'::TEXT,
+      'EVT-PAYPAL-1'::TEXT
     );
   EXCEPTION WHEN OTHERS THEN
     v_caught_exception := true;
@@ -180,21 +180,21 @@ BEGIN
   -- 7B: Matching capture ID must succeed idempotently
   PERFORM reconcile_payment_capture_atomic(
     v_payment_id,
-    'CAPTURE-12345',
+    'CAPTURE-12345'::TEXT,
     v_webhook_id,
     v_quote_id,
     v_request_id,
     v_biz_id,
-    225000,
-    'USD',
-    'EVT-PAYPAL-1'
+    225000::BIGINT,
+    'USD'::TEXT,
+    'EVT-PAYPAL-1'::TEXT
   );
 
   -- 8. Test Webhook Claim Recovery & Metadata Preservation
   INSERT INTO webhook_events (id, provider, event_id, event_type, payload, status, claim_lease_expires_at)
   VALUES (gen_random_uuid(), 'paypal', 'EVT-EXPIRED-1', 'CHECKOUT.ORDER.APPROVED', '{}'::jsonb, 'received', now() - interval '2 minutes');
 
-  IF (SELECT count(*) FROM recover_expired_webhook_claims(10)) < 1 THEN
+  IF (SELECT count(*) FROM recover_expired_webhook_claims(10::INT)) < 1 THEN
     RAISE EXCEPTION 'Test Failed: recover_expired_webhook_claims did not recover expired claim.';
   END IF;
 
