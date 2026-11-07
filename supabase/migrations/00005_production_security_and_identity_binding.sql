@@ -624,22 +624,50 @@ BEGIN
 
   -- 7. Idempotency Check & Conflicting Capture Guard
   IF v_payment.status = 'captured' THEN
-    IF v_payment.provider_capture_id = p_provider_capture_id THEN
-      -- Identical capture ID already processed: return true idempotently
-      RETURN true;
-    ELSE
-      -- Different capture ID on already-captured payment indicates conflict or fraud!
-      RAISE EXCEPTION 'Reconciliation conflict: Payment % is already captured under provider ID %, conflicting capture % rejected',
+    IF v_payment.provider_capture_id IS DISTINCT FROM p_provider_capture_id THEN
+      RAISE EXCEPTION 'Financial reconciliation conflict: Payment % is already captured with different provider capture ID "%" (attempted: "%")',
         p_payment_id, v_payment.provider_capture_id, p_provider_capture_id;
     END IF;
+
+    -- Valid duplicate capture: ensure webhook is marked processed and request is fulfilled
+    UPDATE webhook_events
+    SET status = 'processed',
+        processed_at = COALESCE(processed_at, now()),
+        claim_lease_expires_at = NULL,
+        last_error = NULL
+    WHERE id = p_webhook_id;
+
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+    IF v_rows_affected != 1 THEN
+      RAISE EXCEPTION 'Failed to update webhook event % on idempotent replay: expected 1 row, got %', p_webhook_id, v_rows_affected;
+    END IF;
+
+    IF p_request_id IS NOT NULL THEN
+      UPDATE procurement_requests
+      SET status = 'fulfilled',
+          updated_at = now()
+      WHERE id = p_request_id;
+
+      GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+      IF v_rows_affected != 1 THEN
+        RAISE EXCEPTION 'Failed to update procurement request % on idempotent replay: expected 1 row, got %', p_request_id, v_rows_affected;
+      END IF;
+    END IF;
+
+    RETURN true;
   END IF;
 
-  -- 8. Reconcile Payment Attempt
+  -- Verify payment status is in a valid state for capture
+  IF v_payment.status NOT IN ('created', 'pending') THEN
+    RAISE EXCEPTION 'Financial reconciliation failed: Payment % cannot be captured because status is "%"',
+      p_payment_id, v_payment.status;
+  END IF;
+
+  -- 8. Apply Transactional Updates & Validate Affected Rows
+  -- Update Payment Attempt
   UPDATE payment_attempts
   SET status = 'captured',
       provider_capture_id = p_provider_capture_id,
-      amount_cents = p_amount_cents,
-      currency = p_currency,
       updated_at = now()
   WHERE id = p_payment_id;
 
@@ -651,8 +679,9 @@ BEGIN
   -- 9. Reconcile Webhook Event
   UPDATE webhook_events
   SET status = 'processed',
+      processed_at = now(),
       claim_lease_expires_at = NULL,
-      updated_at = now()
+      last_error = NULL
   WHERE id = p_webhook_id;
 
   GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
@@ -669,7 +698,7 @@ BEGIN
 
     GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
     IF v_rows_affected != 1 THEN
-      RAISE EXCEPTION 'Failed to update procurement request % to completed: expected 1 row, got %', p_request_id, v_rows_affected;
+      RAISE EXCEPTION 'Failed to update procurement request % to fulfilled: expected 1 row, got %', p_request_id, v_rows_affected;
     END IF;
   END IF;
 
