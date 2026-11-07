@@ -41,8 +41,8 @@ BEGIN
   VALUES (v_supplier_id, v_biz_id, 'Tech Supplier Alpha', 'SUP-ALPHA', true, 'low', 'US')
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO procurement_requests (id, business_id, requester_id, requester_name, requester_email, category, urgency, reason, estimated_budget_cents, currency, status)
-  VALUES (v_request_id, v_biz_id, v_user_id, 'Test Requester', 'requester@apex.com', 'Hardware', 'medium', 'Test laptops', 250000, 'USD', 'open');
+  INSERT INTO procurement_requests (id, business_id, requester_id, requester_name, raw_prompt, budget_limit_cents, currency, status)
+  VALUES (v_request_id, v_biz_id, v_user_id, 'Test Requester', 'Test laptops', 250000, 'USD', 'draft');
 
   -- 2. Test Quote Atomic Persistence
   v_quote_json := jsonb_build_object(

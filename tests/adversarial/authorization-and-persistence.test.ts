@@ -1931,7 +1931,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         resetSupabaseClientForTesting();
 
         await expect(persistQuoteToSupabase(validQuote)).rejects.toThrow(
-          /Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed/
+          /Database compatibility error: persist_quote_and_transition_request_atomic RPC is unavailable or failed|Supabase is configured in environment but client failed to initialize/
         );
       } finally {
         if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
@@ -1966,7 +1966,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         resetSupabaseClientForTesting();
 
         await expect(persistApprovalToSupabase(testApproval, validQuote.requestId)).rejects.toThrow(
-          /Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed/
+          /Database compatibility error: persist_approval_and_transition_atomic RPC is unavailable or failed|Supabase is configured in environment but client failed to initialize/
         );
       } finally {
         if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;

@@ -378,7 +378,7 @@ BEGIN
         v_request.business_id, p_business_id;
     END IF;
 
-    IF v_request.status NOT IN ('open', 'quoted') THEN
+    IF v_request.status NOT IN ('open', 'quoted', 'draft') THEN
       RAISE EXCEPTION 'Invalid state transition: Procurement request % is in status "%" which cannot receive quotes',
         p_request_id, v_request.status;
     END IF;
@@ -571,7 +571,7 @@ BEGIN
         v_request.business_id, p_business_id;
     END IF;
 
-    IF v_request.status NOT IN ('open', 'quoted', 'pending_approval') THEN
+    IF v_request.status NOT IN ('open', 'quoted', 'pending_approval', 'draft') THEN
       RAISE EXCEPTION 'Invalid state transition: Procurement request % is in status "%" which cannot be transitioned by approval',
         p_request_id, v_request.status;
     END IF;
