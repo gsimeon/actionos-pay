@@ -94,11 +94,11 @@ jobs:
           PGPASSWORD: test_password
         run: |
           echo "Applying 00001_initial_schema.sql..."
-          psql -h localhost -U test_user -d actionos_test -f supabase/migrations/00001_initial_schema.sql
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00001_initial_schema.sql
           echo "Applying 00002_atomic_reconciliation.sql..."
-          psql -h localhost -U test_user -d actionos_test -f supabase/migrations/00002_atomic_reconciliation.sql
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00002_atomic_reconciliation.sql
           echo "Applying 00003_financial_integrity_hardening.sql..."
-          psql -h localhost -U test_user -d actionos_test -f supabase/migrations/00003_financial_integrity_hardening.sql
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00003_financial_integrity_hardening.sql
           echo "All migrations applied successfully to live PostgreSQL 15."
 
       - name: Run Live PostgreSQL Acceptance & RPC Test Suite
@@ -106,7 +106,7 @@ jobs:
           PGPASSWORD: test_password
         run: |
           echo "Executing live PostgreSQL acceptance & rollback test suite..."
-          psql -h localhost -U test_user -d actionos_test -f tests/db/test-migrations-and-rpcs.sql
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f tests/db/test-migrations-and-rpcs.sql
           echo "PostgreSQL Acceptance Gate Passed 100%."
 
   production-build:

@@ -651,14 +651,4 @@ BEGIN
 
   RETURN true;
 END;
-      'quoteId', p_quote_id,
-      'requestId', p_request_id,
-      'decision', p_decision,
-      'reason', p_approval->>'reason'
-    ),
-    now()
-  );
-
-  RETURN true;
-END;
 $$;
