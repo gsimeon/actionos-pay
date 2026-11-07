@@ -192,8 +192,8 @@ async function runConcurrencyTests() {
 
     // Create payment attempt and verified webhook event
     await client1.query(`
-      INSERT INTO payment_attempts (id, business_id, quote_id, amount_cents, currency, status)
-      VALUES ('${paymentId}', '${testBizId}', '${quoteId}', 105000, 'USD', 'pending');
+      INSERT INTO payment_attempts (id, quote_id, business_id, provider, amount_cents, currency, status, idempotency_key)
+      VALUES ('${paymentId}', '${quoteId}', '${testBizId}', 'paypal', 105000, 'USD', 'created', 'idem-recon-${paymentId}');
 
       INSERT INTO webhook_events (id, provider, event_id, event_type, payload, signature_verified, status)
       VALUES

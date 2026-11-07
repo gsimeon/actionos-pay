@@ -73,8 +73,8 @@ BEGIN
     (v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Verified Supplier', 1, 100000, 5000, 0, 105000, 'USD', 'hash-1', 'active', now() + INTERVAL '1 day'),
     (v_other_quote_id, v_other_request_id, v_other_biz_id, v_other_supplier_id, 'Other Supplier', 1, 50000, 2000, 0, 52000, 'USD', 'hash-other', 'active', now() + INTERVAL '1 day');
 
-  INSERT INTO payment_attempts (id, business_id, quote_id, amount_cents, currency, status)
-  VALUES (v_payment_id, v_biz_id, v_quote_id, 105000, 'USD', 'created');
+  INSERT INTO payment_attempts (id, quote_id, business_id, provider, amount_cents, currency, status, idempotency_key)
+  VALUES (v_payment_id, v_quote_id, v_biz_id, 'paypal', 105000, 'USD', 'created', 'idem-role-test-001');
 
   INSERT INTO webhook_events (id, provider, event_id, event_type, payload, signature_verified, status)
   VALUES (v_webhook_id, 'paypal', 'EVT-ROLE-TEST-001', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "CAPT-ROLE-001"}'::jsonb, true, 'received');
