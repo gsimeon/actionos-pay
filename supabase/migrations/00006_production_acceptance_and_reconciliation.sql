@@ -252,13 +252,13 @@ $$;
 CREATE OR REPLACE FUNCTION reconcile_payment_capture_atomic(
   p_payment_id UUID,
   p_provider_capture_id TEXT,
+  p_webhook_id UUID,
   p_quote_id UUID,
   p_request_id UUID,
   p_business_id UUID,
-  p_webhook_id UUID,
   p_amount_cents BIGINT,
   p_currency TEXT,
-  p_provider TEXT DEFAULT 'paypal'
+  p_event_id TEXT
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -471,7 +471,7 @@ BEGIN
       'amountCents', p_amount_cents,
       'currency', p_currency,
       'webhookId', p_webhook_id,
-      'provider', p_provider
+      'eventId', p_event_id
     ),
     now()
   );

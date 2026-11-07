@@ -187,6 +187,9 @@ async function runConcurrencyTests() {
     const webhookId2 = randomUUID();
     const captureId = `CAPT-${Date.now()}`;
 
+    const eventId1 = `EVT-RECON-1-${Date.now()}`;
+    const eventId2 = `EVT-RECON-2-${Date.now()}`;
+
     // Create payment attempt and verified webhook event
     await client1.query(`
       INSERT INTO payment_attempts (id, business_id, quote_id, amount_cents, currency, status)
@@ -194,18 +197,18 @@ async function runConcurrencyTests() {
 
       INSERT INTO webhook_events (id, provider, event_id, event_type, payload, signature_verified, status)
       VALUES
-        ('${webhookId1}', 'paypal', 'EVT-RECON-1-${Date.now()}', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "${captureId}"}', true, 'received'),
-        ('${webhookId2}', 'paypal', 'EVT-RECON-2-${Date.now()}', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "${captureId}"}', true, 'received');
+        ('${webhookId1}', 'paypal', '${eventId1}', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "${captureId}"}', true, 'received'),
+        ('${webhookId2}', 'paypal', '${eventId2}', 'PAYMENT.CAPTURE.COMPLETED', '{"id": "${captureId}"}', true, 'received');
     `);
 
     const reconResults = await Promise.all([
       client1.query(
         `SELECT reconcile_payment_capture_atomic($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [paymentId, captureId, quoteId, requestId, testBizId, webhookId1, 105000, 'USD', 'paypal']
+        [paymentId, captureId, webhookId1, quoteId, requestId, testBizId, 105000, 'USD', eventId1]
       ),
       client2.query(
         `SELECT reconcile_payment_capture_atomic($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [paymentId, captureId, quoteId, requestId, testBizId, webhookId2, 105000, 'USD', 'paypal']
+        [paymentId, captureId, webhookId2, quoteId, requestId, testBizId, 105000, 'USD', eventId2]
       ),
     ]);
 

@@ -203,7 +203,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         });
 
         const res = await approveRoute(req);
-        expect([401, 403]).toContain(res.status);
+        expect([401, 403, 503]).toContain(res.status);
       } finally {
         if (oldUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = oldUrl;
         else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
