@@ -776,3 +776,105 @@ export async function reconcilePaymentCaptureInSupabase(params: {
     );
   }
 }
+
+/**
+ * Claims expired or retryable webhook events for the background recovery worker.
+ * Fails closed if Supabase is configured and the RPC fails.
+ */
+export async function claimExpiredWebhookEventsInSupabase(
+  batchSize = 10,
+  leaseSeconds = 60,
+  maxRetries = 5
+): Promise<WebhookEventRecord[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { data, error } = await supabase.rpc('claim_expired_webhook_events_for_worker', {
+    p_batch_size: batchSize,
+    p_lease_seconds: leaseSeconds,
+    p_max_retries: maxRetries,
+  });
+
+  if (error) {
+    throw new Error(
+      `Failed to claim expired webhook events in Supabase: ${error.message} (${error.code})`
+    );
+  }
+
+  if (!Array.isArray(data)) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    provider: row.provider,
+    eventId: row.event_id,
+    eventType: row.event_type,
+    signatureVerified: row.signature_verified,
+    payload: row.payload,
+    status: row.status,
+    claimLeaseExpiresAt: row.claim_lease_expires_at,
+    processedAt: row.processed_at,
+    retryCount: row.retry_count,
+    lastError: row.last_error,
+    nextRetryAt: row.next_retry_at,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
+ * Moves webhook events that have exceeded max retries to 'exhausted' status (dead letter queue).
+ * Fails closed if Supabase is configured and the RPC fails.
+ */
+export async function deadLetterExhaustedWebhookEventsInSupabase(maxRetries = 5): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { data, error } = await supabase.rpc('dead_letter_exhausted_webhook_events', {
+    p_max_retries: maxRetries,
+  });
+
+  if (error) {
+    throw new Error(
+      `Failed to dead-letter exhausted webhook events in Supabase: ${error.message} (${error.code})`
+    );
+  }
+
+  return typeof data === 'number' ? data : 0;
+}
+
+/**
+ * Records webhook failure and exponential backoff retry timestamp in Supabase.
+ */
+export async function recordWebhookFailureInSupabase(
+  id: string,
+  errorMessage: string,
+  retryCount: number,
+  nextRetryDelaySeconds = 30
+): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const nextRetryAt = new Date(Date.now() + nextRetryDelaySeconds * 1000).toISOString();
+  const { error } = await supabase
+    .from('webhook_events')
+    .update({
+      status: 'failed',
+      last_error: errorMessage,
+      retry_count: retryCount,
+      next_retry_at: nextRetryAt,
+      claim_lease_expires_at: null,
+    })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Failed to record webhook failure in Supabase: ${error.message} (${error.code})`);
+  }
+}

@@ -27,6 +27,9 @@ export async function authorizeRequest(
   clientSuppliedUserId?: string,
   options?: AuthorizeOptions
 ): Promise<AuthorizationResult> {
+  const resolvedTargetBusinessId =
+    targetBusinessId || req.headers.get('x-business-id') || undefined;
+
   // If an explicit user is required and neither clientSuppliedUserId nor x-demo-user-id is supplied
   if (options?.requireExplicitUser && !clientSuppliedUserId && !req.headers.get('x-demo-user-id') && !req.headers.get('authorization')) {
     return {
@@ -105,7 +108,7 @@ export async function authorizeRequest(
     }
 
     // Resolve active membership from database (dynamic tenant resolution if targetBusinessId omitted)
-    const member = await fetchMembershipFromSupabase(authenticatedUserId, targetBusinessId);
+    const member = await fetchMembershipFromSupabase(authenticatedUserId, resolvedTargetBusinessId);
     if (!member) {
       return {
         authorized: false,
@@ -119,12 +122,12 @@ export async function authorizeRequest(
     }
 
     // Strict tenant boundary check if target organization was specified
-    if (targetBusinessId && member.businessId !== targetBusinessId) {
+    if (resolvedTargetBusinessId && member.businessId !== resolvedTargetBusinessId) {
       return {
         authorized: false,
         errorResponse: NextResponse.json(
           {
-            error: `Approver "${member.userName}" does not belong to business "${targetBusinessId}".`,
+            error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}".`,
           },
           { status: 403 }
         ),
@@ -191,11 +194,11 @@ export async function authorizeRequest(
     };
   }
 
-  if (targetBusinessId && member.businessId !== targetBusinessId) {
+  if (resolvedTargetBusinessId && member.businessId !== resolvedTargetBusinessId) {
     return {
       authorized: false,
       errorResponse: NextResponse.json(
-        { error: `Approver "${member.userName}" does not belong to business "${targetBusinessId}".` },
+        { error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}".` },
         { status: 403 }
       ),
     };

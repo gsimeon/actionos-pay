@@ -6,7 +6,9 @@
 
 import { randomUUID } from 'crypto';
 import {
+  claimExpiredWebhookEventsInSupabase,
   claimWebhookEventInSupabase,
+  deadLetterExhaustedWebhookEventsInSupabase,
   fetchApprovalFromSupabase,
   fetchAuditEventsFromSupabase,
   fetchPaymentByOrderIdFromSupabase,
@@ -23,6 +25,7 @@ import {
   persistRequestToSupabase,
   persistWebhookToSupabase,
   reconcilePaymentCaptureInSupabase,
+  recordWebhookFailureInSupabase,
 } from './supabase';
 import {
   Approval,
@@ -534,6 +537,7 @@ export class LedgerEngine {
       }
       if (existing.status === 'failed') {
         existing.status = 'received';
+        existing.eventType = rec.eventType;
         existing.payload = rec.payload;
         existing.processedAt = undefined;
         existing.claimLeaseExpiresAt = leaseExpiresAt;
@@ -549,6 +553,10 @@ export class LedgerEngine {
   /**
    * Reconciles payment capture, transitions request to fulfilled, marks webhook processed,
    * and records immutable audit log.
+   * Guarantees:
+   * 1. Relational integrity (quote, payment, request, tenant IDs and totals match)
+   * 2. Strict idempotency checking (capture ID must match if already captured)
+   * 3. Database atomic RPC execution when Supabase is configured
    */
   static async reconcilePaymentCaptureAsync(params: {
     payment: PaymentAttempt;
@@ -558,7 +566,82 @@ export class LedgerEngine {
   }): Promise<void> {
     const { payment, webhookRecord, quote, providerCaptureId } = params;
 
-    // Mutate state in memory
+    // 1. Cross-Entity Relational Integrity & Tenant Boundary Checks
+    if (payment.quoteId !== quote.id) {
+      throw new Error(
+        `Relational integrity error: Payment quoteId "${payment.quoteId}" does not match quote "${quote.id}".`
+      );
+    }
+
+    if (payment.businessId !== quote.businessId) {
+      throw new Error(
+        `Tenant boundary error: Payment businessId "${payment.businessId}" does not match quote "${quote.businessId}".`
+      );
+    }
+
+    if (quote.requestId) {
+      const req = await this.getRequestAsync(quote.requestId);
+      if (!req) {
+        throw new Error(
+          `Financial reconciliation failed: Referenced procurement request "${quote.requestId}" does not exist.`
+        );
+      }
+      if (req.businessId !== payment.businessId) {
+        throw new Error(
+          `Tenant boundary error: Request businessId "${req.businessId}" does not match payment "${payment.businessId}".`
+        );
+      }
+    }
+
+    if (payment.amountCents !== quote.totalCents) {
+      throw new Error(
+        `Financial integrity violation: Payment amount (${payment.amountCents} cents) does not match quote total (${quote.totalCents} cents).`
+      );
+    }
+
+    if (payment.currency.toUpperCase() !== quote.currency.toUpperCase()) {
+      throw new Error(
+        `Financial integrity violation: Payment currency (${payment.currency}) does not match quote currency (${quote.currency}).`
+      );
+    }
+
+    // 2. Strict Idempotency Check with Provider Capture ID Verification
+    if (payment.status === 'captured') {
+      if (payment.providerCaptureId && payment.providerCaptureId !== providerCaptureId) {
+        throw new Error(
+          `Financial reconciliation conflict: Payment "${payment.id}" is already captured with different provider capture ID "${payment.providerCaptureId}" (attempted: "${providerCaptureId}").`
+        );
+      }
+
+      // Idempotent duplicate: ensure webhook is recorded as processed
+      webhookRecord.status = 'processed';
+      webhookRecord.processedAt = webhookRecord.processedAt || new Date().toISOString();
+      webhookRecord.claimLeaseExpiresAt = undefined;
+      webhookRecord.lastError = undefined;
+
+      if (isSupabaseConfigured()) {
+        await reconcilePaymentCaptureInSupabase({
+          payment,
+          webhookRecord,
+          quote,
+          providerCaptureId,
+        });
+      }
+
+      const store = getStore();
+      store.webhooks.set(webhookRecord.eventId, webhookRecord);
+
+      const req = store.requests.get(quote.requestId);
+      if (req) {
+        req.status = 'fulfilled';
+        req.updatedAt = new Date().toISOString();
+        store.requests.set(req.id, req);
+      }
+
+      return;
+    }
+
+    // 3. Mutate state
     payment.status = 'captured';
     payment.providerCaptureId = providerCaptureId;
     payment.updatedAt = new Date().toISOString();
@@ -566,6 +649,7 @@ export class LedgerEngine {
     webhookRecord.status = 'processed';
     webhookRecord.processedAt = new Date().toISOString();
     webhookRecord.claimLeaseExpiresAt = undefined;
+    webhookRecord.lastError = undefined;
 
     // Database persistence when Supabase configured
     if (isSupabaseConfigured()) {
@@ -615,37 +699,147 @@ export class LedgerEngine {
   }
 
   /**
-   * Scans for webhook events with expired claim leases and resets them for safe reprocessing.
+   * Claims expired or retryable webhook events for the background recovery worker.
+   * Fails closed when Supabase is configured.
    */
-  static async recoverExpiredWebhookClaimsAsync(): Promise<number> {
+  static async claimExpiredWebhookEventsAsync(
+    batchSize = 10,
+    leaseSeconds = 60,
+    maxRetries = 5
+  ): Promise<WebhookEventRecord[]> {
+    if (isSupabaseConfigured()) {
+      // Must await and propagate error if RPC fails!
+      return await claimExpiredWebhookEventsInSupabase(batchSize, leaseSeconds, maxRetries);
+    }
+
     const store = getStore();
     const now = Date.now();
-    let recoveredCount = 0;
+    const leaseExpiresAt = new Date(now + leaseSeconds * 1000).toISOString();
+    const candidates: WebhookEventRecord[] = [];
 
     for (const webhook of store.webhooks.values()) {
-      if (
+      const retryCount = webhook.retryCount || 0;
+      if (retryCount >= maxRetries) continue;
+
+      const isExpiredClaim =
         webhook.status === 'received' &&
         webhook.claimLeaseExpiresAt &&
-        new Date(webhook.claimLeaseExpiresAt).getTime() < now
-      ) {
-        webhook.claimLeaseExpiresAt = undefined;
-        recoveredCount++;
+        new Date(webhook.claimLeaseExpiresAt).getTime() < now;
+
+      const isRetryableFailed =
+        webhook.status === 'failed' &&
+        (!webhook.nextRetryAt || new Date(webhook.nextRetryAt).getTime() <= now);
+
+      if (isExpiredClaim || isRetryableFailed) {
+        webhook.status = 'received';
+        webhook.claimLeaseExpiresAt = leaseExpiresAt;
+        webhook.retryCount = retryCount + 1;
+        webhook.lastError = undefined;
+        candidates.push(webhook);
+        if (candidates.length >= batchSize) break;
       }
     }
 
+    return candidates;
+  }
+
+  /**
+   * Dead-letters webhook events that have reached maximum retry attempts.
+   */
+  static async deadLetterExhaustedWebhookEventsAsync(maxRetries = 5): Promise<number> {
     if (isSupabaseConfigured()) {
-      const supabase = getSupabase();
-      if (supabase) {
-        const { data, error } = await supabase.rpc('recover_expired_webhook_claims', {
-          p_max_count: 50,
-        });
-        if (!error && Array.isArray(data)) {
-          recoveredCount += data.length;
+      return await deadLetterExhaustedWebhookEventsInSupabase(maxRetries);
+    }
+
+    const store = getStore();
+    let deadLettered = 0;
+    for (const webhook of store.webhooks.values()) {
+      const retryCount = webhook.retryCount || 0;
+      if (retryCount >= maxRetries && webhook.status !== 'processed' && webhook.status !== 'exhausted') {
+        webhook.status = 'exhausted';
+        webhook.claimLeaseExpiresAt = undefined;
+        webhook.lastError =
+          webhook.lastError || 'Maximum retry attempts exceeded without successful reconciliation.';
+        deadLettered++;
+      }
+    }
+    return deadLettered;
+  }
+
+  /**
+   * Records a webhook failure and sets exponential backoff timestamp.
+   */
+  static async recordWebhookFailureAsync(
+    id: string,
+    eventId: string,
+    errorMessage: string,
+    retryCount: number,
+    nextRetryDelaySeconds = 30
+  ): Promise<void> {
+    const store = getStore();
+    const record = store.webhooks.get(eventId);
+    if (record) {
+      record.status = 'failed';
+      record.lastError = errorMessage;
+      record.retryCount = retryCount;
+      record.claimLeaseExpiresAt = undefined;
+      record.nextRetryAt = new Date(Date.now() + nextRetryDelaySeconds * 1000).toISOString();
+    }
+
+    if (isSupabaseConfigured()) {
+      await recordWebhookFailureInSupabase(id, errorMessage, retryCount, nextRetryDelaySeconds);
+    }
+  }
+
+  /**
+   * Durable recovery worker method: claims, revalidates, processes, and dead-letters webhooks.
+   */
+  static async recoverExpiredWebhookClaimsAsync(maxRetries = 5): Promise<number> {
+    const { runWebhookRecoveryWorkerAsync } = await import('./webhook-processor');
+    const result = await runWebhookRecoveryWorkerAsync({ maxRetries });
+    return result.claimedCount;
+  }
+
+  /**
+   * Returns operational webhook counts for monitoring and observability.
+   */
+  static async getWebhookMetricsAsync(): Promise<{
+    total: number;
+    received: number;
+    inProgress: number;
+    processed: number;
+    failed: number;
+    exhausted: number;
+  }> {
+    const store = getStore();
+    const now = Date.now();
+    let received = 0;
+    let inProgress = 0;
+    let processed = 0;
+    let failed = 0;
+    let exhausted = 0;
+
+    for (const w of store.webhooks.values()) {
+      if (w.status === 'processed') processed++;
+      else if (w.status === 'exhausted') exhausted++;
+      else if (w.status === 'failed') failed++;
+      else if (w.status === 'received') {
+        if (w.claimLeaseExpiresAt && new Date(w.claimLeaseExpiresAt).getTime() > now) {
+          inProgress++;
+        } else {
+          received++;
         }
       }
     }
 
-    return recoveredCount;
+    return {
+      total: store.webhooks.size,
+      received,
+      inProgress,
+      processed,
+      failed,
+      exhausted,
+    };
   }
 
   static async getWebhookEventAsync(eventId: string): Promise<WebhookEventRecord | undefined> {

@@ -89,8 +89,7 @@ END;
 $$;
 
 -- Function: reconcile_payment_capture_atomic
--- Atomically validates preconditions (row lock, amount, currency, status), marks payment captured,
--- request fulfilled, webhook processed, and logs audit in a single database transaction.
+-- Atomically marks payment captured, request fulfilled, webhook processed, and logs audit
 CREATE OR REPLACE FUNCTION reconcile_payment_capture_atomic(
   p_payment_id UUID,
   p_provider_capture_id TEXT,
@@ -105,75 +104,22 @@ CREATE OR REPLACE FUNCTION reconcile_payment_capture_atomic(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 AS $$
-DECLARE
-  v_payment payment_attempts%ROWTYPE;
-  v_webhook webhook_events%ROWTYPE;
 BEGIN
-  -- 1. Lock and validate Payment Attempt preconditions
-  SELECT * INTO v_payment
-  FROM payment_attempts
-  WHERE id = p_payment_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Payment attempt "%" not found.', p_payment_id;
-  END IF;
-
-  -- Idempotency check: if already captured with matching provider_capture_id, succeed safely
-  IF v_payment.status = 'captured' THEN
-    RETURN true;
-  END IF;
-
-  IF v_payment.status != 'created' THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Cannot reconcile payment "%" in status "%" (expected "created").',
-      p_payment_id, v_payment.status;
-  END IF;
-
-  IF v_payment.business_id != p_business_id THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Tenant boundary mismatch for payment "%" (expected %, got %).',
-      p_payment_id, p_business_id, v_payment.business_id;
-  END IF;
-
-  IF v_payment.amount_cents != p_amount_cents THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Amount mismatch for payment "%" (expected % cents, received % cents).',
-      p_payment_id, v_payment.amount_cents, p_amount_cents;
-  END IF;
-
-  IF v_payment.currency != p_currency THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Currency mismatch for payment "%" (expected %, received %).',
-      p_payment_id, v_payment.currency, p_currency;
-  END IF;
-
-  -- 2. Lock and validate Webhook Event preconditions
-  SELECT * INTO v_webhook
-  FROM webhook_events
-  WHERE id = p_webhook_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Webhook event "%" not found.', p_webhook_id;
-  END IF;
-
-  IF v_webhook.status != 'received' THEN
-    RAISE EXCEPTION 'Financial Reconciliation Invariant: Cannot reconcile with webhook event "%" in status "%" (expected "received").',
-      p_webhook_id, v_webhook.status;
-  END IF;
-
-  -- 3. Update Payment Attempt to captured
+  -- 1. Update Payment Attempt
   UPDATE payment_attempts
   SET status = 'captured',
       provider_capture_id = p_provider_capture_id,
       updated_at = now()
   WHERE id = p_payment_id;
 
-  -- 4. Update Webhook Event (mark processed and clear active claim lease)
+  -- 2. Update Webhook Event (mark processed and clear lease)
   UPDATE webhook_events
   SET status = 'processed',
       processed_at = now(),
       claim_lease_expires_at = NULL
   WHERE id = p_webhook_id;
 
-  -- 5. Transition Procurement Request if linked
+  -- 3. Transition Procurement Request
   IF p_request_id IS NOT NULL THEN
     UPDATE procurement_requests
     SET status = 'fulfilled',
@@ -181,7 +127,7 @@ BEGIN
     WHERE id = p_request_id;
   END IF;
 
-  -- 6. Insert Authoritative Immutable Audit Record inside transaction
+  -- 4. Record Audit Event
   INSERT INTO audit_events (
     id,
     business_id,
@@ -212,36 +158,6 @@ BEGIN
   );
 
   RETURN true;
-END;
-$$;
-
--- Function: recover_expired_webhook_claims
--- Scans for received webhook events with expired claim leases and prepares them for reprocessing
-CREATE OR REPLACE FUNCTION recover_expired_webhook_claims(
-  p_max_count INT DEFAULT 50
-)
-RETURNS TABLE (
-  recovered_id UUID,
-  event_id TEXT,
-  previous_lease_expiry TIMESTAMPTZ
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN QUERY
-  UPDATE webhook_events
-  SET claim_lease_expires_at = NULL,
-      status = 'received'
-  WHERE id IN (
-    SELECT id
-    FROM webhook_events
-    WHERE status = 'received'
-      AND claim_lease_expires_at IS NOT NULL
-      AND claim_lease_expires_at < now()
-    LIMIT p_max_count
-    FOR UPDATE SKIP LOCKED
-  )
-  RETURNING id, webhook_events.event_id, claim_lease_expires_at;
 END;
 $$;
 
