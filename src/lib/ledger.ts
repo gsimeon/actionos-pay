@@ -26,6 +26,7 @@ import {
   persistWebhookToSupabase,
   reconcilePaymentCaptureInSupabase,
   recordWebhookFailureInSupabase,
+  recoverExpiredWebhookClaimsInSupabase,
 } from './supabase';
 import {
   Approval,
@@ -226,20 +227,23 @@ export class LedgerEngine {
   static async saveQuoteAsync(quote: Quote, actorId = 'system', actorRole = 'quote_engine'): Promise<void> {
     const store = getStore();
     if (isSupabaseConfigured()) {
+      // Executes single-transaction PostgreSQL RPC:
+      // persist_quote_and_transition_request_atomic (quote + items + request status transition + audit)
       await persistQuoteToSupabase(quote);
     }
     store.quotes.set(quote.id, quote);
 
-    // Update parent request active quote
-    const req = await this.getRequestAsync(quote.requestId);
+    // Update in-memory parent request active quote
+    const req = store.requests.get(quote.requestId);
     if (req) {
       req.activeQuoteId = quote.id;
       req.status = 'quoted';
       req.updatedAt = new Date().toISOString();
-      await this.saveRequestAsync(req);
+      store.requests.set(req.id, req);
     }
 
-    await this.logAuditAsync({
+    const auditRecord: AuditEvent = {
+      id: randomUUID(),
       businessId: quote.businessId,
       entityType: 'quote',
       entityId: quote.id,
@@ -254,7 +258,9 @@ export class LedgerEngine {
         checksumHash: quote.checksumHash,
         itemCount: quote.items.length,
       },
-    });
+      createdAt: new Date().toISOString(),
+    };
+    store.auditEvents.push(auditRecord);
   }
 
   static saveQuote(quote: Quote): void {
@@ -290,33 +296,32 @@ export class LedgerEngine {
   // Approval Methods (Async Authoritative)
   static async saveApprovalAsync(approval: Approval): Promise<void> {
     const store = getStore();
+
+    // Look up quote to bind request ID for atomic transaction
+    const quote = await this.getQuoteAsync(approval.quoteId);
+
     if (isSupabaseConfigured()) {
-      await persistApprovalToSupabase(approval);
+      // Executes single-transaction PostgreSQL RPC:
+      // persist_approval_and_transition_atomic (approval + quote status + request status + audit)
+      await persistApprovalToSupabase(approval, quote?.requestId);
     }
     store.approvals.set(approval.id, approval);
 
-    // Update quote status
-    const quote = await this.getQuoteAsync(approval.quoteId);
+    // Update in-memory state
     if (quote) {
       quote.status = approval.decision === 'approved' ? 'approved' : 'rejected';
-      if (isSupabaseConfigured()) {
-        await persistQuoteToSupabase(quote);
-      }
       store.quotes.set(quote.id, quote);
 
-      // Update request status
-      const req = await this.getRequestAsync(quote.requestId);
+      const req = store.requests.get(quote.requestId);
       if (req) {
         req.status = approval.decision === 'approved' ? 'approved' : 'rejected';
         req.updatedAt = new Date().toISOString();
-        if (isSupabaseConfigured()) {
-          await persistRequestToSupabase(req);
-        }
         store.requests.set(req.id, req);
       }
     }
 
-    await this.logAuditAsync({
+    const auditRecord: AuditEvent = {
+      id: randomUUID(),
       businessId: approval.businessId,
       entityType: 'approval',
       entityId: approval.id,
@@ -332,7 +337,10 @@ export class LedgerEngine {
         reason: approval.reason,
         digitalSignature: approval.digitalSignature,
       },
-    });
+      createdAt: new Date().toISOString(),
+    };
+
+    store.auditEvents.push(auditRecord);
   }
 
   static saveApproval(approval: Approval): void {
@@ -798,6 +806,41 @@ export class LedgerEngine {
     const { runWebhookRecoveryWorkerAsync } = await import('./webhook-processor');
     const result = await runWebhookRecoveryWorkerAsync({ maxRetries });
     return result.claimedCount;
+  }
+
+  /**
+   * Resets expired claim leases and returns original lease expiry metadata (preserving previous_lease_expiry).
+   * Fails closed when Supabase is configured.
+   */
+  static async recoverExpiredWebhookClaimsWithMetadataAsync(
+    maxCount = 50
+  ): Promise<Array<{ id: string; eventId: string; previousLeaseExpiry: string | null }>> {
+    if (isSupabaseConfigured()) {
+      return await recoverExpiredWebhookClaimsInSupabase(maxCount);
+    }
+
+    const store = getStore();
+    const now = Date.now();
+    const results: Array<{ id: string; eventId: string; previousLeaseExpiry: string | null }> = [];
+
+    for (const webhook of store.webhooks.values()) {
+      if (
+        webhook.status === 'received' &&
+        webhook.claimLeaseExpiresAt &&
+        new Date(webhook.claimLeaseExpiresAt).getTime() < now
+      ) {
+        const previousLeaseExpiry = webhook.claimLeaseExpiresAt;
+        webhook.claimLeaseExpiresAt = undefined;
+        results.push({
+          id: webhook.id,
+          eventId: webhook.eventId,
+          previousLeaseExpiry,
+        });
+        if (results.length >= maxCount) break;
+      }
+    }
+
+    return results;
   }
 
   /**

@@ -1572,5 +1572,111 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       expect(json.requests.some((r: ProcurementRequest) => r.id === 'req-custom-tenant-1')).toBe(true);
       expect(json.requests.every((r: ProcurementRequest) => r.businessId === customTenantId)).toBe(true);
     });
+
+    it('preserves original lease expiry metadata in recoverExpiredWebhookClaimsWithMetadataAsync (previousLeaseExpiry is never NULL)', async () => {
+      const originalExpiry = new Date(Date.now() - 45000).toISOString();
+      const expiredRecord: WebhookEventRecord = {
+        id: 'wh-meta-1',
+        provider: 'paypal',
+        eventId: 'WH-EVT-META-1',
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+        signatureVerified: true,
+        payload: { id: 'WH-EVT-META-1' },
+        status: 'received',
+        claimLeaseExpiresAt: originalExpiry,
+        createdAt: new Date(Date.now() - 100000).toISOString(),
+      };
+
+      await LedgerEngine.claimWebhookEventAsync(expiredRecord);
+      const stored = await LedgerEngine.getWebhookEventAsync('WH-EVT-META-1');
+      if (stored) {
+        stored.claimLeaseExpiresAt = originalExpiry;
+      }
+
+      const recovered = await LedgerEngine.recoverExpiredWebhookClaimsWithMetadataAsync();
+      const meta = recovered.find((r) => r.eventId === 'WH-EVT-META-1');
+      expect(meta).toBeDefined();
+      expect(meta?.previousLeaseExpiry).toBe(originalExpiry);
+      expect(meta?.previousLeaseExpiry).not.toBeNull();
+    });
+
+    it('atomically transitions procurement request status to quoted when saving quote', async () => {
+      const reqId = 'req-atomic-quote-test-1';
+      const initialReq: ProcurementRequest = {
+        id: reqId,
+        businessId: validQuote.businessId,
+        requesterId: requesterMember.userId,
+        requesterName: requesterMember.userName,
+        rawPrompt: 'Need monitors',
+        status: 'draft',
+        budgetLimitCents: 200000,
+        currency: 'USD',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await LedgerEngine.saveRequestAsync(initialReq);
+
+      const quoteToSave: Quote = {
+        ...validQuote,
+        id: 'quote-atomic-test-1',
+        requestId: reqId,
+      };
+
+      await LedgerEngine.saveQuoteAsync(quoteToSave);
+
+      const updatedReq = await LedgerEngine.getRequestAsync(reqId);
+      expect(updatedReq?.status).toBe('quoted');
+      expect(updatedReq?.activeQuoteId).toBe('quote-atomic-test-1');
+    });
+
+    it('atomically transitions quote and request status when saving approval decision', async () => {
+      const reqId = 'req-atomic-appr-test-1';
+      const initialReq: ProcurementRequest = {
+        id: reqId,
+        businessId: validQuote.businessId,
+        requesterId: requesterMember.userId,
+        requesterName: requesterMember.userName,
+        rawPrompt: 'Need monitors',
+        status: 'quoted',
+        budgetLimitCents: 200000,
+        currency: 'USD',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await LedgerEngine.saveRequestAsync(initialReq);
+
+      const quoteId = 'quote-atomic-appr-test-1';
+      const quoteToSave: Quote = {
+        ...validQuote,
+        id: quoteId,
+        requestId: reqId,
+        status: 'active',
+      };
+      await LedgerEngine.saveQuoteAsync(quoteToSave);
+
+      const approvalToSave: Approval = {
+        id: 'appr-atomic-test-1',
+        quoteId,
+        businessId: validQuote.businessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: 'approver',
+        quoteVersion: quoteToSave.version,
+        approvedTotalCents: quoteToSave.totalCents,
+        approvedCurrency: quoteToSave.currency,
+        approvedSupplierId: quoteToSave.supplierId,
+        decision: 'approved',
+        digitalSignature: 'valid-sig-12345',
+        createdAt: new Date().toISOString(),
+      };
+
+      await LedgerEngine.saveApprovalAsync(approvalToSave);
+
+      const updatedQuote = await LedgerEngine.getQuoteAsync(quoteId);
+      expect(updatedQuote?.status).toBe('approved');
+
+      const updatedReq = await LedgerEngine.getRequestAsync(reqId);
+      expect(updatedReq?.status).toBe('approved');
+    });
   });
 });

@@ -184,13 +184,33 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
     total_cents: i.totalCents,
   }));
 
-  const { error: rpcErr } = await supabase.rpc('create_quote_atomic', {
+  const { error: rpcErr } = await supabase.rpc('persist_quote_and_transition_request_atomic', {
     p_quote: quotePayload,
     p_items: itemsPayload,
+    p_request_id: quote.requestId,
+    p_business_id: quote.businessId,
   });
 
   if (rpcErr) {
-    throw new Error(`Transactional quote persistence failed (create_quote_atomic): ${rpcErr.message} (${rpcErr.code})`);
+    if (
+      rpcErr.message?.includes('persist_quote_and_transition_request_atomic') ||
+      rpcErr.code === 'PGRST202'
+    ) {
+      // Backward-compatible fallback to create_quote_atomic if forward migration not yet applied
+      const { error: legacyErr } = await supabase.rpc('create_quote_atomic', {
+        p_quote: quotePayload,
+        p_items: itemsPayload,
+      });
+      if (legacyErr) {
+        throw new Error(
+          `Transactional quote persistence failed (create_quote_atomic): ${legacyErr.message} (${legacyErr.code})`
+        );
+      }
+      return true;
+    }
+    throw new Error(
+      `Transactional quote persistence failed (persist_quote_and_transition_request_atomic): ${rpcErr.message} (${rpcErr.code})`
+    );
   }
 
   return true;
@@ -198,16 +218,21 @@ export async function persistQuoteToSupabase(quote: Quote): Promise<boolean> {
 
 /**
  * Persists an approval record to Supabase.
+ * Executes atomic PostgreSQL RPC persist_approval_and_transition_atomic to transition
+ * quote and request status and record audit in a single transaction.
  * Throws on failure when Supabase is configured.
  */
-export async function persistApprovalToSupabase(approval: Approval): Promise<boolean> {
+export async function persistApprovalToSupabase(
+  approval: Approval,
+  requestId?: string
+): Promise<boolean> {
   if (!isSupabaseConfigured()) return false;
   const supabase = getSupabase();
   if (!supabase) {
     throw new Error('Supabase is configured in environment but client failed to initialize.');
   }
 
-  const { error } = await supabase.from('approvals').insert({
+  const approvalPayload = {
     id: approval.id,
     quote_id: approval.quoteId,
     business_id: approval.businessId,
@@ -222,11 +247,33 @@ export async function persistApprovalToSupabase(approval: Approval): Promise<boo
     reason: approval.reason || null,
     digital_signature: approval.digitalSignature,
     created_at: approval.createdAt,
+  };
+
+  const { error: rpcErr } = await supabase.rpc('persist_approval_and_transition_atomic', {
+    p_approval: approvalPayload,
+    p_quote_id: approval.quoteId,
+    p_request_id: requestId || null,
+    p_business_id: approval.businessId,
+    p_decision: approval.decision,
   });
 
-  if (error) {
-    throw new Error(`Supabase approval persistence failed: ${error.message} (${error.code})`);
+  if (rpcErr) {
+    if (
+      rpcErr.message?.includes('persist_approval_and_transition_atomic') ||
+      rpcErr.code === 'PGRST202'
+    ) {
+      // Backward-compatible fallback to direct insert if forward migration not yet applied
+      const { error } = await supabase.from('approvals').insert(approvalPayload);
+      if (error) {
+        throw new Error(`Supabase approval persistence failed: ${error.message} (${error.code})`);
+      }
+      return true;
+    }
+    throw new Error(
+      `Transactional approval persistence failed (persist_approval_and_transition_atomic): ${rpcErr.message} (${rpcErr.code})`
+    );
   }
+
   return true;
 }
 
@@ -845,6 +892,38 @@ export async function deadLetterExhaustedWebhookEventsInSupabase(maxRetries = 5)
   }
 
   return typeof data === 'number' ? data : 0;
+}
+
+/**
+ * Resets expired worker claim leases in Supabase, returning previous lease metadata.
+ * Fails closed if Supabase is configured and the RPC fails.
+ */
+export async function recoverExpiredWebhookClaimsInSupabase(
+  maxCount = 50
+): Promise<Array<{ id: string; eventId: string; previousLeaseExpiry: string | null }>> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { data, error } = await supabase.rpc('recover_expired_webhook_claims', {
+    p_max_count: maxCount,
+  });
+
+  if (error) {
+    throw new Error(
+      `Failed to recover expired webhook claims in Supabase: ${error.message} (${error.code})`
+    );
+  }
+
+  if (!Array.isArray(data)) return [];
+
+  return data.map((row) => ({
+    id: row.id,
+    eventId: row.event_id,
+    previousLeaseExpiry: row.previous_lease_expiry,
+  }));
 }
 
 /**

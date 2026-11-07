@@ -1,0 +1,26 @@
+name: Scheduled Webhook Recovery Worker
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-recovery-worker:
+    name: Execute Webhook Claim Recovery & Dead-Letter Processing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Execute Recovery Worker Suite
+        run: npx vitest run tests/adversarial/authorization-and-persistence.test.ts -t "executes durable recovery worker"

@@ -45,7 +45,7 @@ Requirements: Node.js 20.9+ and npm.
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (80/80 passing)
+# 2. Run automated test suites (83/83 passing)
 npm test
 
 # 3. Start development server
@@ -84,7 +84,7 @@ AI_MODEL=gemini-1.5-flash
 
 > **Security Invariant**: When `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are configured with valid credentials, all PayPal API failures (authentication errors, rate limits, instrument declines) fail loudly with explicit failure states. They **never** fall back to simulated success. Simulation is strictly quarantined for credential-free demos with explicit indicators (`SIM-DEMO-ORD-`, `isSimulated: true`), and template placeholders (`your-*`) are automatically ignored.
 
-## Test Suites (80 Tests Passing)
+## Test Suites (83 Tests Passing)
 
 The test suite covers arithmetic precision, multi-currency decimal accuracy, policy guardrails, approval binding, adversarial attacks, PayPal anti-false-positive safety, Supabase persistence durability, and end-to-end flows:
 
@@ -97,14 +97,14 @@ npm test
 - `tests/unit/paypal-safety.test.ts` (6 tests): Anti-false-positive guarantees, placeholder credentials safety, capture error propagation, explicit simulated status indicators (`SIM-DEMO-`), capture idempotency, and strict webhook header validation.
 - `tests/unit/supabase.test.ts` (4 tests): Supabase client initialization, configuration checks, placeholder safety, and error throwing on database write failures.
 - `tests/adversarial/security-guardrails.test.ts` (7 tests): Client price tampering, in-flight term alteration, unapproved vendor attempts, missing approval rejection, double-capture prevention, duplicate webhook deduplication.
-- `tests/adversarial/authorization-and-persistence.test.ts` (44 tests): Server-side approver identity gate, Supabase Auth Bearer session token verification across routes, database-backed membership/role lookup, SoD enforcement, mandatory HMAC secret-backed signature verification with constant-time comparison, legacy SHA-256 rejection, exclusive dedicated `APPROVAL_SIGNING_SECRET` requirement, quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), conflict-safe atomic webhook event claiming with 60s lease TTL, HTTP 429 (`Retry-After: 10`) retry preservation for active claims, mandatory provider capture ID validation (rejecting missing `resource.id` and prohibiting `'CAP-UNKNOWN'`), strict reconciliation idempotency (rejecting mismatched `provider_capture_id` with conflict exceptions while accepting matching duplicate captures), cross-entity relational integrity verification across payment, quote, request, and webhook rows, operational durable webhook recovery worker (`runWebhookRecoveryWorkerAsync`) with retry backoff and dead-lettering (`exhausted` status on >= 5 retries), dedicated recovery endpoint (`/api/paypal/webhook/recover`) with `CRON_SECRET` & admin session authorization, dynamic multi-tenant state isolation across organizations, strict fail-closed database RPC operations, and prohibition of synchronous persistence when Supabase is configured.
+- `tests/adversarial/authorization-and-persistence.test.ts` (47 tests): Server-side approver identity gate, Supabase Auth Bearer session token verification across routes, database-backed membership/role lookup, SoD enforcement, mandatory HMAC secret-backed signature verification with constant-time comparison, legacy SHA-256 rejection, exclusive dedicated `APPROVAL_SIGNING_SECRET` requirement, quote checksum tampering rejection, webhook underpayment rejection (`WEBHOOK_AMOUNT_MISMATCH`), conflict-safe atomic webhook event claiming with 60s lease TTL, HTTP 429 (`Retry-After: 10`) retry preservation for active claims, mandatory provider capture ID validation (rejecting missing `resource.id` and prohibiting `'CAP-UNKNOWN'`), strict reconciliation idempotency (rejecting mismatched `provider_capture_id` with conflict exceptions while accepting matching duplicate captures), cross-entity relational integrity verification across payment, quote, request, and webhook rows, operational durable webhook recovery worker (`runWebhookRecoveryWorkerAsync`) with retry backoff and dead-lettering (`exhausted` status on >= 5 retries), lease expiry metadata preservation in `recoverExpiredWebhookClaimsWithMetadataAsync` (CTE ensures `previous_lease_expiry` is never NULL), atomic quote creation and request status transition (`persist_quote_and_transition_request_atomic`), atomic approval persistence, quote/request status transition, and audit trail (`persist_approval_and_transition_atomic`), dedicated recovery endpoint (`/api/paypal/webhook/recover`) with `CRON_SECRET` & admin session authorization, dynamic multi-tenant state isolation across organizations, strict fail-closed database RPC operations, and prohibition of synchronous persistence when Supabase is configured.
 - `tests/integration/procurement-flow.test.ts` (2 tests): End-to-end deterministic lifecycle via service layer and full lifecycle execution through actual Next.js App Router HTTP handlers (`plan` -> `quote` -> `approve` -> `create-order` -> `capture-order` -> `webhook`).
 
 ## Database Migrations
 
 - `supabase/migrations/00001_initial_schema.sql`: 11 tables with RLS policies, foreign keys, and indexes.
 - `supabase/migrations/00002_atomic_reconciliation.sql`: Schema evolution adding `claim_lease_expires_at` column, `claim_webhook_event`, `create_quote_atomic`, and initial atomic reconciliation.
-- `supabase/migrations/00003_financial_integrity_and_webhook_recovery.sql`: Forward migration adding `retry_count`, `last_error`, `next_retry_at` columns, hardened `reconcile_payment_capture_atomic` with strict capture ID matching idempotency and full relational integrity cross-checks, `claim_expired_webhook_events_for_worker`, and `dead_letter_exhausted_webhook_events`.
+- `supabase/migrations/00003_financial_integrity_hardening.sql`: Forward migration adding `retry_count`, `last_error`, `next_retry_at` columns, hardened `reconcile_payment_capture_atomic` with strict capture ID matching idempotency and full relational integrity cross-checks, `claim_expired_webhook_events_for_worker`, `dead_letter_exhausted_webhook_events`, `recover_expired_webhook_claims` with preserved metadata, `persist_quote_and_transition_request_atomic`, and `persist_approval_and_transition_atomic`.
 - `supabase/seed.sql`: Deterministic tenant, team members, approved/unapproved suppliers, and catalogue products in minor units.
 
 ## License
