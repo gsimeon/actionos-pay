@@ -152,6 +152,12 @@ async function runVerification() {
   console.log(`HATEOAS Approve:   ${result.approveUrl || 'N/A'}`);
   console.log(`Idempotency Key:   ${idempotencyKey}`);
   console.log('========================================================\n');
+
+  console.log('--- Completed End-to-End Buyer-to-Ledger Acceptance Guidance ---');
+  console.log('To complete live buyer approval and capture:');
+  console.log(`1. Open HATEOAS Approve URL in Sandbox browser:\n   ${result.approveUrl}`);
+  console.log('2. Log in with Sandbox Buyer credentials and click "Complete Purchase".');
+  console.log(`3. Run: npm run verify:sandbox -- --capture ${result.orderId}\n`);
 }
 
 runVerification().catch((err) => {

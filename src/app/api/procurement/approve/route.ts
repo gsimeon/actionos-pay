@@ -27,7 +27,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
     }
 
-    // Authorize caller against quote's business organization (requiring approver or admin role)
+    // Authorize caller against quote's business organization (requiring approver or admin role).
+    // The approver identity is derived strictly and immutably from the verified session (auth.member).
+    // Client-supplied approverUserId is never trusted as an authority; if supplied, it is validated for exact match.
     const auth = await authorizeRequest(
       req,
       quote.businessId,
@@ -39,6 +41,16 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
     const approver = auth.member;
+
+    // Defense-in-depth: Re-verify that any client-supplied ID cannot diverge from the verified session member
+    if (approverUserId && approverUserId !== approver.userId) {
+      return NextResponse.json(
+        {
+          error: `Forbidden: Client-supplied approverUserId ("${approverUserId}") does not match authenticated identity ("${approver.userId}").`,
+        },
+        { status: 403 }
+      );
+    }
 
     // Quote status and expiry guardrails
     if (quote.status === 'rejected' || quote.status === 'expired') {
