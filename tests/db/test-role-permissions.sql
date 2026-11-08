@@ -353,7 +353,7 @@ $$;
 DO $$
 DECLARE
   v_app_json JSONB;
-  v_res UUID;
+  v_res BOOLEAN;
 BEGIN
   -- Set auth.uid() matching approver (Chidi: v_approver_id)
   PERFORM set_config('request.jwt.claim.sub', '88888888-8888-4000-8000-000000000001', true);
@@ -382,7 +382,7 @@ BEGIN
     'approved'
   );
 
-  IF v_res IS NULL THEN
+  IF NOT v_res THEN
     RAISE EXCEPTION 'Execution Failure: authenticated caller with matching auth.uid() failed to approve quote';
   END IF;
   RAISE NOTICE '✅ PASS: authenticated caller with matching auth.uid() successfully approves quote.';
@@ -512,7 +512,7 @@ $$;
 DO $$
 DECLARE
   v_app_json JSONB;
-  v_res UUID;
+  v_res BOOLEAN;
 BEGIN
   -- Clear auth.uid() session to prove service_role does not require auth.uid()
   PERFORM set_config('request.jwt.claim.sub', '', true);
@@ -541,7 +541,7 @@ BEGIN
     'approved'
   );
 
-  IF v_res IS NULL THEN
+  IF NOT v_res THEN
     RAISE EXCEPTION 'Execution Failure: service_role failed to approve quote through trusted boundary';
   END IF;
   RAISE NOTICE '✅ PASS: service_role can execute quote approvals through trusted backend boundary.';
