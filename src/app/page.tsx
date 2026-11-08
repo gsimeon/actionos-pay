@@ -100,7 +100,12 @@ export default function Home() {
   // Fetch ledger state
   const refreshLedger = async () => {
     try {
-      const res = await fetch('/api/procurement/state');
+      const res = await fetch('/api/procurement/state', {
+        headers: {
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         setAuditEvents(data.auditEvents || []);
@@ -146,7 +151,11 @@ export default function Home() {
       const budgetCents = parseInt(budgetCap, 10) * 100 || 500000;
       const res = await fetch('/api/procurement/plan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
         body: JSON.stringify({
           prompt,
           budgetLimitCents: budgetCents,
@@ -177,10 +186,15 @@ export default function Home() {
     try {
       const res = await fetch('/api/procurement/quote', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
         body: JSON.stringify({
           requestId: currentRequest.id,
           supplierId: structuredPlan.suggestedSupplierId || DEMO_SUPPLIERS[0].id,
+          callerUserId: currentPersona.userId,
           items: structuredPlan.items.map((i) => ({
             sku: i.sku,
             productId: i.matchedProductId,
@@ -212,7 +226,11 @@ export default function Home() {
     try {
       const res = await fetch('/api/procurement/approve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
         body: JSON.stringify({
           quoteId: currentQuote.id,
           decision,
@@ -244,8 +262,15 @@ export default function Home() {
     try {
       const res = await fetch('/api/paypal/create-order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId: currentQuote.id }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
+        body: JSON.stringify({
+          quoteId: currentQuote.id,
+          callerUserId: currentPersona.userId,
+        }),
       });
 
       const data = await res.json();
@@ -271,8 +296,15 @@ export default function Home() {
     try {
       const res = await fetch('/api/paypal/capture-order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId: paymentAttempt.providerOrderId }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': currentPersona.userId,
+          'x-business-id': currentPersona.businessId,
+        },
+        body: JSON.stringify({
+          orderId: paymentAttempt.providerOrderId,
+          callerUserId: currentPersona.userId,
+        }),
       });
 
       const data = await res.json();
@@ -313,7 +345,11 @@ export default function Home() {
     if (!confirm('Reset all demo requests, quotes, and audit logs?')) return;
     await fetch('/api/procurement/state', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-demo-user-id': DEMO_MEMBERS[2].userId, // Admin (Tunde Davies)
+        'x-business-id': DEMO_BUSINESS.id,
+      },
       body: JSON.stringify({ action: 'reset' }),
     });
     setCurrentRequest(null);

@@ -478,6 +478,45 @@ export async function fetchPaymentByOrderIdFromSupabase(orderId: string): Promis
 }
 
 /**
+ * Authoritatively retrieves latest payment attempt for a quote from Supabase.
+ */
+export async function fetchPaymentForQuoteFromSupabase(quoteId: string): Promise<PaymentAttempt | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('payment_attempts')
+      .select('*')
+      .eq('quote_id', quoteId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      quoteId: data.quote_id,
+      businessId: data.business_id,
+      provider: data.provider,
+      providerOrderId: data.provider_order_id,
+      providerCaptureId: data.provider_capture_id,
+      amountCents: Number(data.amount_cents),
+      currency: data.currency,
+      status: data.status,
+      idempotencyKey: data.idempotency_key,
+      providerResponse: data.provider_response,
+      errorMessage: data.error_message,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetches recent audit events from Supabase for a tenant
  */
 export async function fetchAuditEventsFromSupabase(businessId: string): Promise<AuditEvent[] | null> {

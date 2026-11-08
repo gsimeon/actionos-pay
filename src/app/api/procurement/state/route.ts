@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { DEMO_BUSINESS, DEMO_MEMBERS, DEMO_PRODUCTS, DEMO_SUPPLIERS } from '@/lib/catalog';
 import { LedgerEngine } from '@/lib/ledger';
 import { fetchAuditEventsFromSupabase, isSupabaseConfigured } from '@/lib/supabase';
+import { authorizeRequest } from '@/lib/auth-guard';
 
 export async function GET(req: Request) {
   try {
@@ -9,18 +10,34 @@ export async function GET(req: Request) {
     const requestedBusinessId =
       url.searchParams.get('businessId') ||
       req.headers.get('x-business-id') ||
-      DEMO_BUSINESS.id;
+      undefined;
 
-    let requests = LedgerEngine.getAllRequests();
-    if (requestedBusinessId) {
-      requests = requests.filter((r) => r.businessId === requestedBusinessId);
+    // Strict tenant authorization guard: Require authenticated session and verify business membership
+    const auth = await authorizeRequest(
+      req,
+      requestedBusinessId,
+      ['requester', 'approver', 'admin'],
+      undefined,
+      {
+        requireExplicitUser: true,
+        errorMessage: 'Authentication required. Anonymous access to organization state is prohibited.',
+      }
+    );
+
+    if (!auth.authorized) {
+      return auth.errorResponse!;
     }
 
-    let auditEvents = LedgerEngine.getAuditEvents(requestedBusinessId);
+    const businessId = auth.member?.businessId || requestedBusinessId || DEMO_BUSINESS.id;
+
+    let requests = LedgerEngine.getAllRequests();
+    requests = requests.filter((r) => r.businessId === businessId);
+
+    let auditEvents = LedgerEngine.getAuditEvents(businessId);
 
     const isConnected = isSupabaseConfigured();
     if (isConnected) {
-      const supabaseEvents = await fetchAuditEventsFromSupabase(requestedBusinessId);
+      const supabaseEvents = await fetchAuditEventsFromSupabase(businessId);
       if (supabaseEvents && supabaseEvents.length > 0) {
         // Merge Supabase events with any local events, deduplicated by id
         const eventMap = new Map();
@@ -34,12 +51,12 @@ export async function GET(req: Request) {
     }
 
     const business =
-      requestedBusinessId === DEMO_BUSINESS.id
+      businessId === DEMO_BUSINESS.id
         ? DEMO_BUSINESS
         : {
-            id: requestedBusinessId,
-            name: `Organization ${requestedBusinessId.slice(0, 8)}`,
-            slug: `org-${requestedBusinessId.slice(0, 8)}`,
+            id: businessId,
+            name: `Organization ${businessId.slice(0, 8)}`,
+            slug: `org-${businessId.slice(0, 8)}`,
             defaultCurrency: 'USD',
             budgetLimitCents: 1000000,
             createdAt: new Date().toISOString(),
@@ -49,13 +66,13 @@ export async function GET(req: Request) {
       success: true,
       business,
       members: DEMO_MEMBERS.filter(
-        (m) => m.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+        (m) => m.businessId === businessId || businessId === DEMO_BUSINESS.id
       ),
       suppliers: DEMO_SUPPLIERS.filter(
-        (s) => s.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+        (s) => s.businessId === businessId || businessId === DEMO_BUSINESS.id
       ),
       products: DEMO_PRODUCTS.filter(
-        (p) => p.businessId === requestedBusinessId || requestedBusinessId === DEMO_BUSINESS.id
+        (p) => p.businessId === businessId || businessId === DEMO_BUSINESS.id
       ),
       requests,
       auditEvents,
@@ -70,6 +87,33 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const isDemoExplicitlyAllowed = process.env.APP_MODE === 'demo' || !isProduction;
+
+    // Strict Production Gate: Reset action is prohibited outside explicitly enabled demo mode
+    if (isProduction && !isDemoExplicitlyAllowed) {
+      return NextResponse.json(
+        { error: 'Prohibited: State reset is disabled in production environment.' },
+        { status: 403 }
+      );
+    }
+
+    // Require admin role for state reset
+    const auth = await authorizeRequest(
+      req,
+      undefined,
+      ['admin'],
+      undefined,
+      {
+        requireExplicitUser: true,
+        errorMessage: 'Authentication required. Anonymous state reset is prohibited.',
+      }
+    );
+
+    if (!auth.authorized) {
+      return auth.errorResponse!;
+    }
+
     const body = await req.json().catch(() => ({}));
     const { action } = body as { action?: string };
 

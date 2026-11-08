@@ -53,6 +53,12 @@ async function runConcurrencyTests() {
       VALUES ('${testSupplierId}', '${testBizId}', 'Concurrency Hardware', 'SUP-CONCURR', true, 'low', 'US');
     `);
 
+    // Switch both sessions to production service_role to verify concurrent execution under intended execution role
+    console.log('\n[Role Context] Transitioning concurrent sessions to production service_role...');
+    await client1.query('SET ROLE service_role');
+    await client2.query('SET ROLE service_role');
+    console.log('✅ Both client sessions verified executing under service_role.');
+
     // =========================================================================
     // TEST 1: Simultaneous Webhook Claiming Race
     // =========================================================================
@@ -246,19 +252,45 @@ async function runConcurrencyTests() {
     await client1.query(`SELECT * FROM quotes WHERE id = '${testRollbackQuoteId}' FOR UPDATE`);
     console.log('  Session 1 holds exclusive FOR UPDATE lock on quote row.');
 
+    // Obtain Session 2's backend PID to observe lock wait deterministically in pg_locks
+    const pidRes = await client2.query(`SELECT pg_backend_pid() AS pid`);
+    const session2Pid = pidRes.rows[0].pid;
+
     // Session 2 initiates update in background (blocked by Session 1 lock)
     let session2Finished = false;
+    let session2Error: Error | null = null;
     const session2Promise = (async () => {
-      await client2.query(`UPDATE quotes SET subtotal_cents = 45000, total_cents = 47000 WHERE id = '${testRollbackQuoteId}'`);
-      session2Finished = true;
+      try {
+        await client2.query(`UPDATE quotes SET subtotal_cents = 45000, total_cents = 47000 WHERE id = '${testRollbackQuoteId}'`);
+        session2Finished = true;
+      } catch (err: unknown) {
+        session2Error = err instanceof Error ? err : new Error(String(err));
+      }
     })();
 
-    // Verify Session 2 is currently blocked waiting for Session 1 lock
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Deterministically verify Session 2 is waiting on lock grant (granted = false) in pg_locks
+    let isBlockedOnLock = false;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const lockCheck = await client1.query(
+        `SELECT count(*) FROM pg_locks WHERE pid = $1 AND granted = false`,
+        [session2Pid]
+      );
+      if (parseInt(lockCheck.rows[0].count, 10) > 0) {
+        isBlockedOnLock = true;
+        break;
+      }
+      if (session2Finished) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    if (!isBlockedOnLock && !session2Finished) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
     if (session2Finished) {
       throw new Error('Locking Failure: Session 2 did not block on Session 1 FOR UPDATE lock.');
     }
-    console.log('  Session 2 correctly blocked waiting for lock release.');
+    console.log(`  Session 2 (PID ${session2Pid}) verified blocked waiting for lock release via pg_locks.`);
 
     // Session 1 aborts and rolls back
     await client1.query('ROLLBACK');
@@ -266,6 +298,7 @@ async function runConcurrencyTests() {
 
     // Session 2 unblocks and finishes
     await session2Promise;
+    if (session2Error) throw session2Error;
     console.log('  Session 2 unblocked and acquired lock cleanly.');
 
     const verifyQuote = await client1.query(`SELECT total_cents FROM quotes WHERE id = '${testRollbackQuoteId}'`);

@@ -18,6 +18,7 @@ export interface AuthorizationResult {
 
 export interface AuthorizeOptions {
   requireExplicitUser?: boolean;
+  errorMessage?: string;
 }
 
 export async function authorizeRequest(
@@ -32,10 +33,13 @@ export async function authorizeRequest(
 
   // If an explicit user is required and neither clientSuppliedUserId nor x-demo-user-id is supplied
   if (options?.requireExplicitUser && !clientSuppliedUserId && !req.headers.get('x-demo-user-id') && !req.headers.get('authorization')) {
+    const errorMsg =
+      options.errorMessage ||
+      'approverUserId is required. Anonymous or unauthenticated approvals are prohibited.';
     return {
       authorized: false,
       errorResponse: NextResponse.json(
-        { error: 'approverUserId is required. Anonymous or unauthenticated approvals are prohibited.' },
+        { error: errorMsg },
         { status: 401 }
       ),
     };

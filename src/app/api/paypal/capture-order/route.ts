@@ -43,9 +43,11 @@ export async function POST(req: Request) {
       });
     }
 
+    const stableCaptureIdempotencyKey = `capture-${paymentAttempt.id}-${orderId}`;
     const result = await capturePayPalOrder({
       orderId,
       paymentAttempt,
+      idempotencyKey: stableCaptureIdempotencyKey,
     });
 
     // Authoritatively persist updated payment attempt

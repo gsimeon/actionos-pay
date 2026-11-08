@@ -229,7 +229,7 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
       expect(result.reason).toContain('Missing required PayPal signature verification headers');
     });
 
-    it('completes the entire 7-stage buyer-to-ledger transaction, duplicate event replay & reconciliation journey', async () => {
+    it('verifies the 7-stage buyer-to-ledger transaction flow (live order creation, HATEOAS extraction & contract-verified webhook reconciliation)', async () => {
       const { LedgerEngine } = await import('@/lib/ledger');
       const { processWebhookEventRecordAsync } = await import('@/lib/webhook-processor');
 
@@ -240,7 +240,7 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
       delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
       try {
-        // Stage 1: Order Creation against live PayPal Sandbox Orders v2
+        // Stage 1: Order Creation against live PayPal Sandbox Orders v2 API
         const liveOrderResult = await createPayPalOrder({
           quote: testQuote,
           approval: testApproval,
@@ -267,7 +267,9 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
         };
         await LedgerEngine.savePaymentAttemptAsync(paymentAttempt);
 
-        // Stage 5: Webhook Event Delivery with Real Payload Structure
+        // Stage 5: Webhook Event Ingestion (Simulated Webhook Contract Verification with Structured Payload)
+        // Note: Live webhook delivery requires an internet-routable callback domain and webhook ID.
+        // This stage validates the processing contract against the authoritative ledger engine.
         const webhookEventId = `WH-EVT-LIVE-${Date.now()}`;
         const providerCaptureId = `CAPT-LIVE-${Date.now()}`;
 
