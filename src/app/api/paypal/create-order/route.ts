@@ -74,9 +74,47 @@ export async function POST(req: Request) {
       );
     }
 
+    // Authoritative check for existing payment attempts for this quote
+    const existingPayment = await LedgerEngine.getPaymentForQuoteAsync(quote.id);
+    if (existingPayment) {
+      if (existingPayment.status === 'captured') {
+        return NextResponse.json(
+          {
+            error: 'Cannot create PayPal order: Quote has already been paid and captured.',
+            paymentAttempt: existingPayment,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (existingPayment.status === 'created' || existingPayment.status === 'reconciling') {
+        // Idempotent replay: return existing active order details without re-charging or creating a duplicate PayPal order
+        const providerLinks = (existingPayment.providerResponse as Record<string, unknown> | undefined)?.links;
+        const approveLink =
+          (Array.isArray(providerLinks)
+            ? providerLinks.find((l: { rel?: string; href?: string }) => l?.rel === 'approve')?.href
+            : undefined) ||
+          (existingPayment.providerOrderId?.startsWith('SIM-')
+            ? `https://www.sandbox.paypal.com/checkoutnow?token=${existingPayment.providerOrderId}`
+            : undefined);
+
+        return NextResponse.json({
+          success: true,
+          orderId: existingPayment.providerOrderId,
+          status: existingPayment.status.toUpperCase(),
+          approveUrl: approveLink,
+          paymentAttempt: existingPayment,
+          isSimulated: Boolean(existingPayment.providerResponse?.is_simulated),
+          isReplay: true,
+        });
+      }
+    }
+
+    const stableIdempotencyKey = `order-${quote.id}-v${quote.version}`;
     const result = await createPayPalOrder({
       quote,
       approval,
+      idempotencyKey: stableIdempotencyKey,
     });
 
     // Authoritative persistence

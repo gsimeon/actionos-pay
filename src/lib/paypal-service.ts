@@ -93,7 +93,7 @@ export async function createPayPalOrder(params: {
   approval: Approval;
   idempotencyKey?: string;
 }): Promise<CreateOrderResult> {
-  const { quote, approval, idempotencyKey = randomUUID() } = params;
+  const { quote, approval, idempotencyKey = `order-${params.quote.id}-v${params.quote.version}` } = params;
 
   // 1. Mandatory Security Invariant: Verify Approval Binding
   const bindingCheck = verifyApprovalBinding(approval, quote);
@@ -252,7 +252,11 @@ export async function capturePayPalOrder(params: {
   paymentAttempt: PaymentAttempt;
   idempotencyKey?: string;
 }): Promise<CaptureOrderResult> {
-  const { orderId, paymentAttempt, idempotencyKey = randomUUID() } = params;
+  const {
+    orderId,
+    paymentAttempt,
+    idempotencyKey = `capture-${params.paymentAttempt.id}-${params.orderId}`,
+  } = params;
 
   // Check state machine: already captured
   if (paymentAttempt.status === 'captured') {
@@ -369,7 +373,12 @@ export async function capturePayPalOrder(params: {
 }
 
 /**
- * Validates a PayPal webhook event signature strictly
+ * Validates a PayPal webhook event signature strictly.
+ * Security Invariants:
+ * 1. Live or production environments strictly prohibit mock signatures and simulation.
+ * 2. In any non-demo deployment, real PayPal credentials and PAYPAL_WEBHOOK_ID are mandatory.
+ *    Missing configuration FAILS CLOSED immediately.
+ * 3. Mock signatures are permitted ONLY when APP_MODE=demo AND NODE_ENV !== 'production' AND PAYPAL_ENV !== 'live'.
  */
 export async function verifyWebhookSignature(params: {
   headers: Record<string, string>;
@@ -377,9 +386,24 @@ export async function verifyWebhookSignature(params: {
 }): Promise<{ verified: boolean; reason?: string }> {
   const creds = getPayPalCredentials();
   const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isLiveEnv = creds?.env === 'live' || process.env.PAYPAL_ENV === 'live' || process.env.PAYPAL_ENV === 'production';
+  const isDemoExplicitlyAllowed = process.env.APP_MODE === 'demo';
 
-  // Real verification via PayPal API
-  const hasRealWebhookId = webhookId && !isPlaceholder(webhookId);
+  const hasRealWebhookId = Boolean(webhookId && !isPlaceholder(webhookId));
+
+  // 1. Mandatory Security Gate: Live, production, or non-demo mode require real credentials & webhook ID
+  if (isProduction || isLiveEnv || !isDemoExplicitlyAllowed) {
+    if (!creds || !hasRealWebhookId) {
+      return {
+        verified: false,
+        reason:
+          'Security Fail-Closed: Real PayPal credentials (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET) and PAYPAL_WEBHOOK_ID are mandatory for webhook verification. Live production or non-demo environment strictly prohibits mock signature verification.',
+      };
+    }
+  }
+
+  // 2. Real cryptographic verification via PayPal API (when real credentials and webhook ID are present)
   if (creds && hasRealWebhookId) {
     const requiredHeaders = [
       'paypal-auth-algo',
@@ -432,15 +456,19 @@ export async function verifyWebhookSignature(params: {
     }
   }
 
-  // In live production mode, simulation headers and mock signatures are strictly forbidden
-  if (process.env.PAYPAL_ENV === 'production') {
+  // 3. Demo Mock Verification Gate:
+  // Strictly permitted ONLY when:
+  // - APP_MODE === 'demo'
+  // - NODE_ENV !== 'production'
+  // - creds?.env !== 'live'
+  if (!isDemoExplicitlyAllowed || isProduction || isLiveEnv) {
     return {
       verified: false,
-      reason: 'Live production environment strictly prohibits simulation and mock signatures.',
+      reason: 'Live production or non-demo environment strictly prohibits mock signature verification.',
     };
   }
 
-  // Simulation test mode: require mock signature token
+  // Demo mode: check signature token
   const sig =
     params.headers['paypal-transmission-sig'] ||
     params.headers['x-mock-sandbox-signature'];

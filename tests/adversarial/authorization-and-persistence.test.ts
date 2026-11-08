@@ -5,10 +5,11 @@ import { POST as webhookRoute } from '@/app/api/paypal/webhook/route';
 import { POST as createOrderRoute } from '@/app/api/paypal/create-order/route';
 import { POST as captureOrderRoute } from '@/app/api/paypal/capture-order/route';
 import { POST as planRoute } from '@/app/api/procurement/plan/route';
-import { GET as getStateRoute } from '@/app/api/procurement/state/route';
+import { GET as getStateRoute, POST as postStateRoute } from '@/app/api/procurement/state/route';
 import { GET as getRecoverRoute, POST as postRecoverRoute } from '@/app/api/paypal/webhook/recover/route';
 import { LedgerEngine } from '@/lib/ledger';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
+import { verifyWebhookSignature } from '@/lib/paypal-service';
 import {
   computeApprovalSignature,
   getApprovalSigningSecret,
@@ -94,6 +95,7 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
   });
 
   beforeEach(async () => {
+    process.env.APP_MODE = 'demo';
     LedgerEngine.reset();
     await LedgerEngine.saveRequestAsync(mockRequest);
     await LedgerEngine.saveQuoteAsync(validQuote);
@@ -1614,32 +1616,230 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
       }
     });
 
-    it('verifies /api/procurement/state isolates state and audit events to the requested organization context', async () => {
-      const customTenantId = '00000000-0000-4000-8000-000000000999';
-      const customRequest: ProcurementRequest = {
-        id: 'req-custom-tenant-1',
-        businessId: customTenantId,
-        requesterId: 'user-custom-1',
-        requesterName: 'Custom User',
-        rawPrompt: 'Custom prompt',
-        status: 'draft',
-        budgetLimitCents: 500000,
-        currency: 'USD',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await LedgerEngine.saveRequestAsync(customRequest);
-
-      const req = new Request(`http://localhost/api/procurement/state?businessId=${customTenantId}`, {
+    it('rejects anonymous access to /api/procurement/state with 401', async () => {
+      const req = new Request('http://localhost/api/procurement/state', {
         method: 'GET',
+      });
+      const res = await getStateRoute(req);
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error).toContain('Authentication required');
+    });
+
+    it('rejects cross-tenant access to /api/procurement/state with 403', async () => {
+      const foreignTenantId = '00000000-0000-4000-8000-000000000999';
+      const req = new Request(`http://localhost/api/procurement/state?businessId=${foreignTenantId}`, {
+        method: 'GET',
+        headers: {
+          'x-demo-user-id': requesterMember.userId, // belongs to testBusinessId
+        },
+      });
+      const res = await getStateRoute(req);
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error).toContain('does not belong to business');
+    });
+
+    it('verifies /api/procurement/state isolates state and audit events to the verified member organization context', async () => {
+      const req = new Request(`http://localhost/api/procurement/state?businessId=${testBusinessId}`, {
+        method: 'GET',
+        headers: {
+          'x-demo-user-id': requesterMember.userId,
+        },
       });
       const res = await getStateRoute(req);
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.success).toBe(true);
-      expect(json.business.id).toBe(customTenantId);
-      expect(json.requests.some((r: ProcurementRequest) => r.id === 'req-custom-tenant-1')).toBe(true);
-      expect(json.requests.every((r: ProcurementRequest) => r.businessId === customTenantId)).toBe(true);
+      expect(json.business.id).toBe(testBusinessId);
+      expect(json.requests.every((r: ProcurementRequest) => r.businessId === testBusinessId)).toBe(true);
+    });
+
+    it('rejects anonymous state reset on POST /api/procurement/state with 401', async () => {
+      const req = new Request('http://localhost/api/procurement/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset' }),
+      });
+      const res = await postStateRoute(req);
+      expect(res.status).toBe(401);
+      const json = await res.json();
+      expect(json.error).toContain('Authentication required');
+    });
+
+    it('rejects unauthorized non-admin role from resetting state with 403', async () => {
+      const req = new Request('http://localhost/api/procurement/state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': requesterMember.userId, // role: requester
+        },
+        body: JSON.stringify({ action: 'reset' }),
+      });
+      const res = await postStateRoute(req);
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error).toContain('Authorized roles: admin');
+    });
+
+    it('strictly prohibits state reset in production environment with 403', async () => {
+      const env = process.env as Record<string, string | undefined>;
+      const oldNodeEnv = env.NODE_ENV;
+      const oldAppMode = env.APP_MODE;
+      try {
+        env.NODE_ENV = 'production';
+        delete env.APP_MODE;
+
+        const req = new Request('http://localhost/api/procurement/state', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-demo-user-id': DEMO_MEMBERS[2].userId, // admin
+          },
+          body: JSON.stringify({ action: 'reset' }),
+        });
+        const res = await postStateRoute(req);
+        expect(res.status).toBe(403);
+        const json = await res.json();
+        expect(json.error).toContain('State reset is disabled in production environment');
+      } finally {
+        env.NODE_ENV = oldNodeEnv;
+        if (oldAppMode) env.APP_MODE = oldAppMode;
+        else delete env.APP_MODE;
+      }
+    });
+
+    it('allows admin role in demo mode to reset state successfully', async () => {
+      const req = new Request('http://localhost/api/procurement/state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': DEMO_MEMBERS[2].userId, // admin (Tunde)
+        },
+        body: JSON.stringify({ action: 'reset' }),
+      });
+      const res = await postStateRoute(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.message).toContain('Ledger and procurement state reset');
+    });
+
+    it('strictly enforces payment idempotency on duplicate order creation and reuses existing active attempt', async () => {
+      // First, create valid approved quote
+      const testSig = computeApprovalSignature({
+        quoteId: validQuote.id,
+        quoteVersion: validQuote.version,
+        quoteChecksum: validQuote.checksumHash,
+        totalCents: validQuote.totalCents,
+        currency: validQuote.currency,
+        supplierId: validQuote.supplierId,
+        approverId: approverMember.userId,
+        decision: 'approved',
+      });
+
+      const approvalPayload: Approval = {
+        id: 'app-idem-test-1',
+        quoteId: validQuote.id,
+        businessId: testBusinessId,
+        approverId: approverMember.userId,
+        approverName: approverMember.userName,
+        approverRole: approverMember.role,
+        quoteVersion: validQuote.version,
+        approvedTotalCents: validQuote.totalCents,
+        approvedCurrency: validQuote.currency,
+        approvedSupplierId: validQuote.supplierId,
+        decision: 'approved',
+        reason: 'Approved for idempotency test',
+        digitalSignature: testSig,
+        createdAt: new Date().toISOString(),
+      };
+      await LedgerEngine.saveApprovalAsync(approvalPayload);
+
+      // Call create-order first time
+      const req1 = new Request('http://localhost/api/paypal/create-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': requesterMember.userId,
+        },
+        body: JSON.stringify({ quoteId: validQuote.id }),
+      });
+      const res1 = await createOrderRoute(req1);
+      expect(res1.status).toBe(200);
+      const json1 = await res1.json();
+      expect(json1.success).toBe(true);
+      expect(json1.orderId).toBeDefined();
+
+      // Call create-order second time (identical request)
+      const req2 = new Request('http://localhost/api/paypal/create-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': requesterMember.userId,
+        },
+        body: JSON.stringify({ quoteId: validQuote.id }),
+      });
+      const res2 = await createOrderRoute(req2);
+      expect(res2.status).toBe(200);
+      const json2 = await res2.json();
+      expect(json2.success).toBe(true);
+      expect(json2.isReplay).toBe(true);
+      expect(json2.orderId).toBe(json1.orderId);
+      expect(json2.paymentAttempt.id).toBe(json1.paymentAttempt.id);
+    });
+
+    it('fails closed on webhook mock-signature when APP_MODE is not demo or environment is live/production', async () => {
+      const env = process.env as Record<string, string | undefined>;
+      const oldAppMode = env.APP_MODE;
+      const oldNodeEnv = env.NODE_ENV;
+      const oldPaypalEnv = env.PAYPAL_ENV;
+      try {
+        // Case 1: APP_MODE not set
+        delete env.APP_MODE;
+        env.NODE_ENV = 'development';
+        env.PAYPAL_ENV = 'sandbox';
+
+        const res1 = await verifyWebhookSignature({
+          headers: {
+            'paypal-transmission-sig': 'valid-simulation-sig-12345',
+          },
+          body: JSON.stringify({ id: 'WH-TEST-FAIL-1', event_type: 'PAYMENT.CAPTURE.COMPLETED' }),
+        });
+        expect(res1.verified).toBe(false);
+        expect(res1.reason).toContain('Security Fail-Closed');
+
+        // Case 2: Production environment
+        env.APP_MODE = 'demo';
+        env.NODE_ENV = 'production';
+        const res2 = await verifyWebhookSignature({
+          headers: {
+            'paypal-transmission-sig': 'valid-simulation-sig-12345',
+          },
+          body: JSON.stringify({ id: 'WH-TEST-FAIL-2', event_type: 'PAYMENT.CAPTURE.COMPLETED' }),
+        });
+        expect(res2.verified).toBe(false);
+        expect(res2.reason).toContain('prohibits mock signature verification');
+
+        // Case 3: Live PayPal environment
+        env.APP_MODE = 'demo';
+        env.NODE_ENV = 'development';
+        env.PAYPAL_ENV = 'live';
+        const res3 = await verifyWebhookSignature({
+          headers: {
+            'paypal-transmission-sig': 'valid-simulation-sig-12345',
+          },
+          body: JSON.stringify({ id: 'WH-TEST-FAIL-3', event_type: 'PAYMENT.CAPTURE.COMPLETED' }),
+        });
+        expect(res3.verified).toBe(false);
+        expect(res3.reason).toContain('prohibits mock signature verification');
+      } finally {
+        if (oldAppMode) env.APP_MODE = oldAppMode;
+        else delete env.APP_MODE;
+        env.NODE_ENV = oldNodeEnv;
+        if (oldPaypalEnv) env.PAYPAL_ENV = oldPaypalEnv;
+        else delete env.PAYPAL_ENV;
+      }
     });
 
     it('preserves original lease expiry metadata in recoverExpiredWebhookClaimsWithMetadataAsync (previousLeaseExpiry is never NULL)', async () => {

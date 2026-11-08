@@ -78,6 +78,7 @@ jobs:
           test -f supabase/migrations/00004_financial_controls_and_authorization.sql || exit 1
           test -f supabase/migrations/00005_production_security_and_identity_binding.sql || exit 1
           test -f supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
+          test -f supabase/migrations/00007_payment_idempotency_and_security_closure.sql || exit 1
           echo "Checking essential stored procedures in migration 00006..."
           grep -q "reconcile_payment_capture_atomic" supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
           grep -q "claim_webhook_event" supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
@@ -89,7 +90,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
 
-      - name: Execute Clean Standalone PostgreSQL Migration Upgrade (00001 -> 00002 -> 00003 -> 00004 -> 00005 -> 00006)
+      - name: Execute Clean Standalone PostgreSQL Migration Upgrade (00001 -> 00002 -> 00003 -> 00004 -> 00005 -> 00006 -> 00007)
         env:
           PGPASSWORD: test_password
         run: |
@@ -105,6 +106,8 @@ jobs:
           psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00005_production_security_and_identity_binding.sql
           echo "Applying 00006_production_acceptance_and_reconciliation.sql (Phase 10 Upgrade)..."
           psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00006_production_acceptance_and_reconciliation.sql
+          echo "Applying 00007_payment_idempotency_and_security_closure.sql (Phase 11 Upgrade)..."
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00007_payment_idempotency_and_security_closure.sql
           echo "All migrations applied successfully to live PostgreSQL 15."
 
       - name: Run Live PostgreSQL Acceptance & RPC Test Suite

@@ -12,6 +12,7 @@ import {
   fetchApprovalFromSupabase,
   fetchAuditEventsFromSupabase,
   fetchPaymentByOrderIdFromSupabase,
+  fetchPaymentForQuoteFromSupabase,
   fetchQuoteFromSupabase,
   fetchRequestFromSupabase,
   fetchWebhookFromSupabase,
@@ -559,6 +560,15 @@ export class LedgerEngine {
 
   static getPaymentByOrderId(orderId: string): PaymentAttempt | undefined {
     return Array.from(getStore().payments.values()).find((p) => p.providerOrderId === orderId);
+  }
+
+  static async getPaymentForQuoteAsync(quoteId: string): Promise<PaymentAttempt | undefined> {
+    if (isSupabaseConfigured()) {
+      const dbPayment = await fetchPaymentForQuoteFromSupabase(quoteId);
+      if (dbPayment) return dbPayment;
+    }
+    const list = Array.from(getStore().payments.values()).filter((p) => p.quoteId === quoteId);
+    return list[list.length - 1];
   }
 
   static getPaymentForQuote(quoteId: string): PaymentAttempt | undefined {

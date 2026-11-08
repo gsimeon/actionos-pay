@@ -13,6 +13,7 @@ import {
   getPayPalCredentials,
   getAccessToken,
   createPayPalOrder,
+  capturePayPalOrder,
 } from '../src/lib/paypal-service';
 import { computeApprovalSignature } from '../src/lib/approval-engine';
 import { computeQuoteChecksum } from '../src/lib/quote-engine';
@@ -134,8 +135,55 @@ async function runVerification() {
   };
 
   // Step 3: Orders v2 API Order Creation
+  const captureIndex = process.argv.indexOf('--capture');
+  const specifiedOrderId = captureIndex !== -1 && process.argv[captureIndex + 1] ? process.argv[captureIndex + 1] : null;
+
+  if (specifiedOrderId) {
+    console.log(`[4/4] Attempting capture for existing order "${specifiedOrderId}"...`);
+    const paymentAttempt = {
+      id: randomUUID(),
+      quoteId: quote.id,
+      businessId: quote.businessId,
+      provider: 'paypal' as const,
+      providerOrderId: specifiedOrderId,
+      amountCents: quote.totalCents,
+      currency: quote.currency,
+      status: 'created' as const,
+      idempotencyKey: `capture-${randomUUID()}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const captureResult = await capturePayPalOrder({
+      orderId: specifiedOrderId,
+      paymentAttempt,
+      idempotencyKey: `capture-script-${specifiedOrderId}`,
+    });
+
+    if (captureResult.status === 'COMPLETED') {
+      console.log('\n========================================================');
+      console.log('🎉 LIVE PAYPAL SANDBOX ORDER CAPTURED SUCCESSFULLY');
+      console.log('========================================================');
+      console.log(`Order ID:          ${specifiedOrderId}`);
+      console.log(`Capture ID:        ${captureResult.captureId}`);
+      console.log(`Status:            COMPLETED`);
+      console.log(`Amount:            $${(quote.totalCents / 100).toFixed(2)} ${quote.currency}`);
+      console.log('========================================================\n');
+      return;
+    } else {
+      console.log('\n========================================================');
+      console.log('⚠️ LIVE CAPTURE NOT COMPLETED: AWAITING BUYER APPROVAL');
+      console.log('========================================================');
+      console.log(`Order ID:          ${specifiedOrderId}`);
+      console.log(`Error:             ${captureResult.errorMessage}`);
+      console.log('To complete capture, log into sandbox.paypal.com with buyer credentials and approve the order.');
+      console.log('========================================================\n');
+      return;
+    }
+  }
+
   console.log('[4/4] Creating live PayPal Sandbox Order (POST /v2/checkout/orders)...');
-  const idempotencyKey = randomUUID();
+  const idempotencyKey = `order-${quote.id}-v${quote.version}`;
   const result = await createPayPalOrder({
     quote,
     approval,
@@ -158,6 +206,7 @@ async function runVerification() {
   console.log(`1. Open HATEOAS Approve URL in Sandbox browser:\n   ${result.approveUrl}`);
   console.log('2. Log in with Sandbox Buyer credentials and click "Complete Purchase".');
   console.log(`3. Run: npm run verify:sandbox -- --capture ${result.orderId}\n`);
+  console.log('[NOTE: Live payment capture is NOT RUN until buyer approval is completed in Sandbox browser]');
 }
 
 runVerification().catch((err) => {

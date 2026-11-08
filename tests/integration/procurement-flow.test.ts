@@ -18,6 +18,7 @@ import { POST as webhookRoute } from '../../src/app/api/paypal/webhook/route';
 
 describe('End-to-End Procurement Flow Integration', () => {
   beforeEach(() => {
+    process.env.APP_MODE = 'demo';
     LedgerEngine.reset();
   });
 
