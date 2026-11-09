@@ -517,11 +517,11 @@ BEGIN
   INSERT INTO quotes (
     id, request_id, business_id, supplier_id, supplier_name,
     version, subtotal_cents, tax_cents, shipping_cents, total_cents,
-    currency, status, expires_at, created_at
+    currency, checksum_hash, status, expires_at, created_at
   ) VALUES (
     v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Tech Supplies Inc.',
     1, 50000, 3750, 2000, 55750,
-    'USD', 'approved', now() + INTERVAL '1 day', now()
+    'USD', 'p12-checksum-hash', 'approved', now() + INTERVAL '1 day', now()
   );
 
   DECLARE
