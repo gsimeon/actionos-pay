@@ -28,6 +28,11 @@ import {
   reconcilePaymentCaptureInSupabase,
   recordWebhookFailureInSupabase,
   recoverExpiredWebhookClaimsInSupabase,
+  reservePaymentAttemptInSupabase,
+  confirmPaymentOrderInSupabase,
+  failPaymentAttemptInSupabase,
+  claimPaymentCaptureInSupabase,
+  releasePaymentCaptureClaimInSupabase,
 } from './supabase';
 import {
   Approval,
@@ -574,6 +579,356 @@ export class LedgerEngine {
   static getPaymentForQuote(quoteId: string): PaymentAttempt | undefined {
     const list = Array.from(getStore().payments.values()).filter((p) => p.quoteId === quoteId);
     return list[list.length - 1];
+  }
+
+  /**
+   * Atomically reserves a payment attempt before contacting PayPal.
+   * Enforces exactly-one in-flight order creation per quote across all clients.
+   */
+  static async reservePaymentAttemptAsync(params: {
+    quoteId: string;
+    businessId: string;
+    amountCents: number;
+    currency: string;
+    idempotencyKey: string;
+    reservationSeconds?: number;
+  }): Promise<{
+    status: 'RESERVED' | 'REPLAY' | 'IN_FLIGHT' | 'ALREADY_CAPTURED';
+    paymentAttemptId?: string;
+    providerOrderId?: string;
+    providerCaptureId?: string;
+    paymentStatus?: string;
+    providerResponse?: Record<string, unknown>;
+    idempotencyKey?: string;
+    expiresAt?: string;
+    amountCents?: number;
+    currency?: string;
+    paymentAttempt?: PaymentAttempt;
+  }> {
+    const store = getStore();
+
+    if (isSupabaseConfigured()) {
+      const res = await reservePaymentAttemptInSupabase(params);
+      if (res.status === 'RESERVED') {
+        const attempt: PaymentAttempt = {
+          id: res.paymentAttemptId!,
+          quoteId: params.quoteId,
+          businessId: params.businessId,
+          provider: 'paypal',
+          providerOrderId: undefined,
+          amountCents: params.amountCents,
+          currency: params.currency,
+          status: 'created',
+          idempotencyKey: params.idempotencyKey,
+          orderReservationExpiresAt: res.expiresAt,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        store.payments.set(attempt.id, attempt);
+        return { ...res, paymentAttempt: attempt };
+      } else if (res.status === 'REPLAY') {
+        let attempt = await this.getPaymentByOrderIdAsync(res.providerOrderId!);
+        if (!attempt) {
+          attempt = {
+            id: res.paymentAttemptId!,
+            quoteId: params.quoteId,
+            businessId: params.businessId,
+            provider: 'paypal',
+            providerOrderId: res.providerOrderId,
+            amountCents: res.amountCents || params.amountCents,
+            currency: res.currency || params.currency,
+            status: (res.paymentStatus as PaymentAttempt['status']) || 'created',
+            idempotencyKey: res.idempotencyKey || params.idempotencyKey,
+            providerResponse: res.providerResponse,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          store.payments.set(attempt.id, attempt);
+        }
+        return { ...res, paymentAttempt: attempt };
+      } else if (res.status === 'ALREADY_CAPTURED') {
+        const attempt = await this.getPaymentForQuoteAsync(params.quoteId);
+        return { ...res, paymentAttempt: attempt };
+      } else {
+        // IN_FLIGHT
+        return res;
+      }
+    }
+
+    // In-Memory Engine Fallback (Local / Test Mode)
+    const existing = Array.from(store.payments.values())
+      .filter((p) => p.quoteId === params.quoteId && ['created', 'approved', 'reconciling', 'captured'].includes(p.status))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+    if (existing) {
+      if (existing.status === 'captured') {
+        return {
+          status: 'ALREADY_CAPTURED',
+          paymentAttemptId: existing.id,
+          providerOrderId: existing.providerOrderId,
+          providerCaptureId: existing.providerCaptureId,
+          paymentAttempt: existing,
+        };
+      }
+
+      if (existing.providerOrderId) {
+        return {
+          status: 'REPLAY',
+          paymentAttemptId: existing.id,
+          providerOrderId: existing.providerOrderId,
+          paymentStatus: existing.status,
+          providerResponse: existing.providerResponse,
+          idempotencyKey: existing.idempotencyKey,
+          paymentAttempt: existing,
+        };
+      }
+
+      // Existing reservation without providerOrderId
+      const reservationExpires = existing.orderReservationExpiresAt
+        ? new Date(existing.orderReservationExpiresAt).getTime()
+        : 0;
+      if (reservationExpires > Date.now()) {
+        return {
+          status: 'IN_FLIGHT',
+          paymentAttemptId: existing.id,
+          expiresAt: existing.orderReservationExpiresAt,
+          paymentAttempt: existing,
+        };
+      }
+
+      // Expired reservation: renew it
+      const reservationDuration = params.reservationSeconds ?? 120;
+      existing.orderReservationExpiresAt = new Date(Date.now() + reservationDuration * 1000).toISOString();
+      existing.idempotencyKey = params.idempotencyKey;
+      existing.amountCents = params.amountCents;
+      existing.currency = params.currency;
+      existing.updatedAt = new Date().toISOString();
+      store.payments.set(existing.id, existing);
+
+      return {
+        status: 'RESERVED',
+        paymentAttemptId: existing.id,
+        expiresAt: existing.orderReservationExpiresAt,
+        paymentAttempt: existing,
+      };
+    }
+
+    // No existing attempt: Create fresh reservation
+    const reservationDuration = params.reservationSeconds ?? 120;
+    const newAttempt: PaymentAttempt = {
+      id: randomUUID(),
+      quoteId: params.quoteId,
+      businessId: params.businessId,
+      provider: 'paypal',
+      providerOrderId: undefined,
+      amountCents: params.amountCents,
+      currency: params.currency,
+      status: 'created',
+      idempotencyKey: params.idempotencyKey,
+      orderReservationExpiresAt: new Date(Date.now() + reservationDuration * 1000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.payments.set(newAttempt.id, newAttempt);
+
+    return {
+      status: 'RESERVED',
+      paymentAttemptId: newAttempt.id,
+      expiresAt: newAttempt.orderReservationExpiresAt,
+      paymentAttempt: newAttempt,
+    };
+  }
+
+  /**
+   * Commits the created PayPal order ID to the reserved payment attempt.
+   */
+  static async confirmPaymentOrderAsync(params: {
+    paymentAttemptId: string;
+    providerOrderId: string;
+    providerResponse: Record<string, unknown>;
+    paymentAttempt?: PaymentAttempt;
+  }): Promise<void> {
+    const store = getStore();
+    if (isSupabaseConfigured()) {
+      await confirmPaymentOrderInSupabase({
+        paymentAttemptId: params.paymentAttemptId,
+        providerOrderId: params.providerOrderId,
+        providerResponse: params.providerResponse,
+      });
+    }
+
+    let attempt = store.payments.get(params.paymentAttemptId);
+    if (!attempt && params.paymentAttempt) {
+      attempt = params.paymentAttempt;
+    }
+    if (attempt) {
+      attempt.providerOrderId = params.providerOrderId;
+      attempt.providerResponse = params.providerResponse;
+      attempt.orderReservationExpiresAt = undefined;
+      attempt.updatedAt = new Date().toISOString();
+      store.payments.set(attempt.id, attempt);
+
+      const quote = await this.getQuoteAsync(attempt.quoteId);
+      if (quote) {
+        const req = await this.getRequestAsync(quote.requestId);
+        if (req) {
+          req.status = 'payment_pending';
+          req.updatedAt = new Date().toISOString();
+          store.requests.set(req.id, req);
+        }
+      }
+
+      await this.logAuditAsync({
+        businessId: attempt.businessId,
+        entityType: 'payment',
+        entityId: attempt.id,
+        actorId: 'system',
+        actorRole: 'paypal_service',
+        action: 'PAYMENT_ATTEMPT_CREATED',
+        payload: {
+          provider: attempt.provider,
+          providerOrderId: attempt.providerOrderId,
+          amountCents: attempt.amountCents,
+          currency: attempt.currency,
+          status: attempt.status,
+          idempotencyKey: attempt.idempotencyKey,
+        },
+      });
+    }
+  }
+
+  /**
+   * Marks a reserved payment attempt as failed on PayPal rejection.
+   */
+  static async failPaymentAttemptAsync(
+    paymentAttemptId: string,
+    errorMessage: string
+  ): Promise<void> {
+    const store = getStore();
+    if (isSupabaseConfigured()) {
+      await failPaymentAttemptInSupabase(paymentAttemptId, errorMessage);
+    }
+
+    const attempt = store.payments.get(paymentAttemptId);
+    if (attempt) {
+      attempt.status = 'failed';
+      attempt.errorMessage = errorMessage;
+      attempt.orderReservationExpiresAt = undefined;
+      attempt.captureLeaseExpiresAt = undefined;
+      attempt.updatedAt = new Date().toISOString();
+      store.payments.set(attempt.id, attempt);
+
+      const quote = await this.getQuoteAsync(attempt.quoteId);
+      if (quote) {
+        const req = await this.getRequestAsync(quote.requestId);
+        if (req) {
+          req.status = 'approved';
+          req.updatedAt = new Date().toISOString();
+          store.requests.set(req.id, req);
+        }
+      }
+    }
+  }
+
+  /**
+   * Acquires a capture lease on a payment attempt to prevent concurrent capture calls.
+   */
+  static async claimPaymentCaptureAsync(
+    orderId: string,
+    leaseSeconds = 60
+  ): Promise<{
+    status: 'CLAIMED' | 'ALREADY_CAPTURED' | 'IN_FLIGHT' | 'FAILED';
+    paymentAttemptId?: string;
+    providerCaptureId?: string;
+    leaseExpiresAt?: string;
+    paymentAttempt?: PaymentAttempt;
+    errorMessage?: string;
+  }> {
+    const store = getStore();
+
+    if (isSupabaseConfigured()) {
+      const res = await claimPaymentCaptureInSupabase(orderId, leaseSeconds);
+      const attempt = await this.getPaymentByOrderIdAsync(orderId);
+      return {
+        status: res.status,
+        paymentAttemptId: res.paymentAttemptId,
+        providerCaptureId: res.providerCaptureId,
+        leaseExpiresAt: res.leaseExpiresAt,
+        paymentAttempt: attempt,
+        errorMessage: res.errorMessage,
+      };
+    }
+
+    const attempt = Array.from(store.payments.values()).find((p) => p.providerOrderId === orderId);
+    if (!attempt) {
+      throw new Error(`Payment attempt not found for orderId "${orderId}".`);
+    }
+
+    if (attempt.status === 'captured') {
+      return {
+        status: 'ALREADY_CAPTURED',
+        paymentAttemptId: attempt.id,
+        providerCaptureId: attempt.providerCaptureId,
+        paymentAttempt: attempt,
+      };
+    }
+
+    if (attempt.status === 'failed') {
+      return {
+        status: 'FAILED',
+        paymentAttemptId: attempt.id,
+        errorMessage: attempt.errorMessage,
+        paymentAttempt: attempt,
+      };
+    }
+
+    const leaseExpires = attempt.captureLeaseExpiresAt
+      ? new Date(attempt.captureLeaseExpiresAt).getTime()
+      : 0;
+
+    if (attempt.status === 'reconciling' && leaseExpires > Date.now()) {
+      return {
+        status: 'IN_FLIGHT',
+        paymentAttemptId: attempt.id,
+        leaseExpiresAt: attempt.captureLeaseExpiresAt,
+        paymentAttempt: attempt,
+      };
+    }
+
+    attempt.status = 'reconciling';
+    attempt.captureLeaseExpiresAt = new Date(Date.now() + leaseSeconds * 1000).toISOString();
+    attempt.updatedAt = new Date().toISOString();
+    store.payments.set(attempt.id, attempt);
+
+    return {
+      status: 'CLAIMED',
+      paymentAttemptId: attempt.id,
+      leaseExpiresAt: attempt.captureLeaseExpiresAt,
+      paymentAttempt: attempt,
+    };
+  }
+
+  /**
+   * Releases a capture lease upon capture failure or timeout.
+   */
+  static async releasePaymentCaptureClaimAsync(
+    paymentAttemptId: string,
+    status: 'created' | 'approved' | 'failed',
+    errorMessage?: string
+  ): Promise<void> {
+    const store = getStore();
+    if (isSupabaseConfigured()) {
+      await releasePaymentCaptureClaimInSupabase(paymentAttemptId, status, errorMessage);
+    }
+
+    const attempt = store.payments.get(paymentAttemptId);
+    if (attempt) {
+      attempt.status = status;
+      attempt.captureLeaseExpiresAt = undefined;
+      if (errorMessage) attempt.errorMessage = errorMessage;
+      attempt.updatedAt = new Date().toISOString();
+      store.payments.set(attempt.id, attempt);
+    }
   }
 
   // Webhook Methods (Async Authoritative)

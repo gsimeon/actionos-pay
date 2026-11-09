@@ -407,6 +407,49 @@ BEGIN
 END;
 $$;
 
+-- Test 2E: authenticated role blocked from reserve_payment_attempt_atomic
+DO $$
+DECLARE
+  v_caught BOOLEAN := false;
+BEGIN
+  BEGIN
+    PERFORM reserve_payment_attempt_atomic(
+      '44444444-4444-4000-8000-000000000001'::UUID,
+      '00000000-0000-4000-8000-000000000001'::UUID,
+      105000,
+      'USD',
+      'idemp-auth-test',
+      120
+    );
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_caught := true;
+  END;
+
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'Privilege Violation: authenticated role was allowed to execute reserve_payment_attempt_atomic';
+  END IF;
+  RAISE NOTICE '✅ PASS: authenticated cannot execute reserve_payment_attempt_atomic (restricted to service_role).';
+END;
+$$;
+
+-- Test 2F: authenticated role blocked from claim_payment_capture_atomic
+DO $$
+DECLARE
+  v_caught BOOLEAN := false;
+BEGIN
+  BEGIN
+    PERFORM claim_payment_capture_atomic('ORDER-AUTH-TEST', 60);
+  EXCEPTION WHEN insufficient_privilege THEN
+    v_caught := true;
+  END;
+
+  IF NOT v_caught THEN
+    RAISE EXCEPTION 'Privilege Violation: authenticated role was allowed to execute claim_payment_capture_atomic';
+  END IF;
+  RAISE NOTICE '✅ PASS: authenticated cannot execute claim_payment_capture_atomic (restricted to service_role).';
+END;
+$$;
+
 
 -- =============================================================================
 -- 3. ROLE TEST: service_role (Trusted Backend Engine)
@@ -545,6 +588,46 @@ BEGIN
     RAISE EXCEPTION 'Execution Failure: service_role failed to approve quote through trusted boundary';
   END IF;
   RAISE NOTICE '✅ PASS: service_role can execute quote approvals through trusted backend boundary.';
+END;
+$$;
+
+-- Test 3E: service_role can execute reserve_payment_attempt_atomic
+DO $$
+DECLARE
+  v_res_json JSONB;
+BEGIN
+  v_res_json := reserve_payment_attempt_atomic(
+    '44444444-4444-4000-8000-000000000003'::UUID,
+    '00000000-0000-4000-8000-000000000001'::UUID,
+    73500,
+    'USD',
+    'idemp-sr-reserve-test',
+    120
+  );
+
+  IF (v_res_json->>'status') != 'RESERVED' THEN
+    RAISE EXCEPTION 'Execution Failure: service_role failed to reserve payment attempt: %', v_res_json;
+  END IF;
+  RAISE NOTICE '✅ PASS: service_role can execute reserve_payment_attempt_atomic.';
+END;
+$$;
+
+-- Test 3F: service_role can execute claim_payment_capture_atomic
+DO $$
+DECLARE
+  v_claim_json JSONB;
+BEGIN
+  -- Confirm order first
+  UPDATE payment_attempts
+  SET provider_order_id = 'ORDER-SR-CAPTURE-TEST'
+  WHERE quote_id = '44444444-4444-4000-8000-000000000003'::UUID;
+
+  v_claim_json := claim_payment_capture_atomic('ORDER-SR-CAPTURE-TEST', 60);
+
+  IF (v_claim_json->>'status') != 'CLAIMED' THEN
+    RAISE EXCEPTION 'Execution Failure: service_role failed to claim capture: %', v_claim_json;
+  END IF;
+  RAISE NOTICE '✅ PASS: service_role can execute claim_payment_capture_atomic.';
 END;
 $$;
 

@@ -969,3 +969,186 @@ export async function recordWebhookFailureInSupabase(
     throw new Error(`Failed to record webhook failure in Supabase: ${error.message} (${error.code})`);
   }
 }
+
+export interface SupabaseReservePaymentResult {
+  status: 'RESERVED' | 'REPLAY' | 'IN_FLIGHT' | 'ALREADY_CAPTURED';
+  paymentAttemptId?: string;
+  providerOrderId?: string;
+  providerCaptureId?: string;
+  paymentStatus?: string;
+  providerResponse?: Record<string, unknown>;
+  idempotencyKey?: string;
+  expiresAt?: string;
+  amountCents?: number;
+  currency?: string;
+}
+
+/**
+ * Atomically reserves a payment attempt in Supabase before contacting PayPal.
+ * Enforces exactly one in-flight order creation per quote.
+ */
+export async function reservePaymentAttemptInSupabase(params: {
+  quoteId: string;
+  businessId: string;
+  amountCents: number;
+  currency: string;
+  idempotencyKey: string;
+  reservationSeconds?: number;
+}): Promise<SupabaseReservePaymentResult> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured');
+  }
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { data, error } = await supabase.rpc('reserve_payment_attempt_atomic', {
+    p_quote_id: params.quoteId,
+    p_business_id: params.businessId,
+    p_amount_cents: params.amountCents,
+    p_currency: params.currency,
+    p_idempotency_key: params.idempotencyKey,
+    p_reservation_seconds: params.reservationSeconds ?? 120,
+  });
+
+  if (error) {
+    throw new Error(`Failed to reserve payment attempt in Supabase: ${error.message} (${error.code})`);
+  }
+
+  return {
+    status: data.status,
+    paymentAttemptId: data.payment_attempt_id,
+    providerOrderId: data.provider_order_id,
+    providerCaptureId: data.provider_capture_id,
+    paymentStatus: data.payment_status,
+    providerResponse: data.provider_response,
+    idempotencyKey: data.idempotency_key,
+    expiresAt: data.expires_at,
+    amountCents: data.amount_cents ? Number(data.amount_cents) : undefined,
+    currency: data.currency,
+  };
+}
+
+/**
+ * Commits provider order ID and response to a reserved payment attempt in Supabase.
+ */
+export async function confirmPaymentOrderInSupabase(params: {
+  paymentAttemptId: string;
+  providerOrderId: string;
+  providerResponse: Record<string, unknown>;
+}): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { error } = await supabase.rpc('confirm_payment_order_atomic', {
+    p_payment_attempt_id: params.paymentAttemptId,
+    p_provider_order_id: params.providerOrderId,
+    p_provider_response: params.providerResponse,
+  });
+
+  if (error) {
+    throw new Error(`Failed to confirm payment order in Supabase: ${error.message} (${error.code})`);
+  }
+}
+
+/**
+ * Marks a reserved payment attempt as failed in Supabase.
+ */
+export async function failPaymentAttemptInSupabase(
+  paymentAttemptId: string,
+  errorMessage: string
+): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { error } = await supabase.rpc('fail_payment_attempt_atomic', {
+    p_payment_attempt_id: paymentAttemptId,
+    p_error_message: errorMessage,
+  });
+
+  if (error) {
+    throw new Error(`Failed to mark payment attempt failed in Supabase: ${error.message} (${error.code})`);
+  }
+}
+
+export interface SupabaseClaimCaptureResult {
+  status: 'CLAIMED' | 'ALREADY_CAPTURED' | 'IN_FLIGHT' | 'FAILED';
+  paymentAttemptId?: string;
+  providerCaptureId?: string;
+  leaseExpiresAt?: string;
+  businessId?: string;
+  quoteId?: string;
+  amountCents?: number;
+  currency?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Atomically acquires a capture lease on a payment attempt in Supabase.
+ * Enforces mutual exclusion for simultaneous capture requests.
+ */
+export async function claimPaymentCaptureInSupabase(
+  orderId: string,
+  leaseSeconds = 60
+): Promise<SupabaseClaimCaptureResult> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured');
+  }
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { data, error } = await supabase.rpc('claim_payment_capture_atomic', {
+    p_order_id: orderId,
+    p_lease_duration_seconds: leaseSeconds,
+  });
+
+  if (error) {
+    throw new Error(`Failed to claim payment capture in Supabase: ${error.message} (${error.code})`);
+  }
+
+  return {
+    status: data.status,
+    paymentAttemptId: data.payment_attempt_id,
+    providerCaptureId: data.provider_capture_id,
+    leaseExpiresAt: data.lease_expires_at,
+    businessId: data.business_id,
+    quoteId: data.quote_id,
+    amountCents: data.amount_cents ? Number(data.amount_cents) : undefined,
+    currency: data.currency,
+    errorMessage: data.error_message,
+  };
+}
+
+/**
+ * Releases a payment capture lease in Supabase upon failure or cancellation.
+ */
+export async function releasePaymentCaptureClaimInSupabase(
+  paymentAttemptId: string,
+  status: 'created' | 'approved' | 'failed',
+  errorMessage?: string
+): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase client uninitialized');
+  }
+
+  const { error } = await supabase.rpc('release_payment_capture_claim_atomic', {
+    p_payment_attempt_id: paymentAttemptId,
+    p_status: status,
+    p_error_message: errorMessage || null,
+  });
+
+  if (error) {
+    throw new Error(`Failed to release capture claim in Supabase: ${error.message} (${error.code})`);
+  }
+}

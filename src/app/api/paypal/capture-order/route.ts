@@ -32,29 +32,63 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
 
-    // Idempotency check: If already successfully captured, return completed state without recharging
-    if (paymentAttempt.status === 'captured') {
+    // Atomic Capture Claim: Acquire lease to prevent concurrent capture execution
+    const claim = await LedgerEngine.claimPaymentCaptureAsync(orderId, 60);
+
+    if (claim.status === 'ALREADY_CAPTURED') {
       return NextResponse.json({
         success: true,
-        captureId: paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
+        captureId: claim.providerCaptureId || paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
         status: 'COMPLETED',
-        paymentAttempt,
-        isSimulated: Boolean(paymentAttempt.providerResponse?.is_simulated),
+        paymentAttempt: claim.paymentAttempt || paymentAttempt,
+        isSimulated: Boolean(claim.paymentAttempt?.providerResponse?.is_simulated || paymentAttempt.providerResponse?.is_simulated),
+        isReplay: true,
       });
     }
 
-    const stableCaptureIdempotencyKey = `capture-${paymentAttempt.id}-${orderId}`;
-    const result = await capturePayPalOrder({
-      orderId,
-      paymentAttempt,
-      idempotencyKey: stableCaptureIdempotencyKey,
-    });
+    if (claim.status === 'IN_FLIGHT') {
+      return NextResponse.json(
+        {
+          error: 'Payment capture is currently being processed for this order. Please retry in a few seconds.',
+        },
+        {
+          status: 429,
+          headers: { 'Retry-After': '5' },
+        }
+      );
+    }
 
-    // Authoritatively persist updated payment attempt
-    await LedgerEngine.savePaymentAttemptAsync(result.paymentAttempt);
+    if (claim.status === 'FAILED') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: claim.errorMessage || paymentAttempt.errorMessage || 'Payment capture previously failed.',
+          status: 'FAILED',
+          paymentAttempt: claim.paymentAttempt || paymentAttempt,
+        },
+        { status: 402 }
+      );
+    }
 
-    // If capture failed, return explicit payment failure status - NEVER simulate or claim success!
+    const activeAttempt = claim.paymentAttempt || paymentAttempt;
+    const stableCaptureIdempotencyKey = `capture-${activeAttempt.id}-${orderId}`;
+
+    let result;
+    try {
+      result = await capturePayPalOrder({
+        orderId,
+        paymentAttempt: activeAttempt,
+        idempotencyKey: stableCaptureIdempotencyKey,
+      });
+    } catch (captureErr: unknown) {
+      const errMsg = captureErr instanceof Error ? captureErr.message : String(captureErr);
+      await LedgerEngine.releasePaymentCaptureClaimAsync(activeAttempt.id, 'approved', errMsg);
+      throw captureErr;
+    }
+
+    // If capture failed, release lease, record failure and return 402
     if (result.status === 'FAILED') {
+      await LedgerEngine.releasePaymentCaptureClaimAsync(activeAttempt.id, 'failed', result.errorMessage);
       return NextResponse.json(
         {
           success: false,
@@ -66,6 +100,9 @@ export async function POST(req: Request) {
         { status: 402 }
       );
     }
+
+    // Authoritatively persist successfully captured payment attempt
+    await LedgerEngine.savePaymentAttemptAsync(result.paymentAttempt);
 
     return NextResponse.json({
       success: true,

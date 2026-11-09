@@ -158,6 +158,8 @@ export interface PaymentAttempt {
   idempotencyKey: string;
   providerResponse?: Record<string, unknown>;
   errorMessage?: string;
+  orderReservationExpiresAt?: string;
+  captureLeaseExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
 }

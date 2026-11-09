@@ -423,7 +423,38 @@ describe('Adversarial Authorization, Webhook Fraud & Persistence Tests', () => {
         const res = await approveRoute(req);
         expect(res.status).toBe(500);
         const json = await res.json();
-        expect(json.error).toContain('Demo mode fallback is prohibited unless APP_MODE=demo');
+        expect(json.error).toContain('Demo mode fallback is prohibited in production');
+      } finally {
+        env.NODE_ENV = oldNodeEnv;
+        if (oldAppMode) env.APP_MODE = oldAppMode;
+        else delete env.APP_MODE;
+      }
+    });
+
+    it('strictly rejects demo identity headers in production even when APP_MODE=demo', async () => {
+      const env = process.env as Record<string, string | undefined>;
+      const oldNodeEnv = env.NODE_ENV;
+      const oldAppMode = env.APP_MODE;
+      try {
+        env.NODE_ENV = 'production';
+        env.APP_MODE = 'demo';
+
+        const req = new Request('http://localhost/api/procurement/approve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-demo-user-id': approverMember.userId,
+          },
+          body: JSON.stringify({
+            quoteId: validQuote.id,
+            decision: 'approved',
+          }),
+        });
+
+        const res = await approveRoute(req);
+        expect(res.status).toBe(403);
+        const json = await res.json();
+        expect(json.error).toContain('Demo identity headers (x-demo-user-id) are strictly prohibited in production mode');
       } finally {
         env.NODE_ENV = oldNodeEnv;
         if (oldAppMode) env.APP_MODE = oldAppMode;

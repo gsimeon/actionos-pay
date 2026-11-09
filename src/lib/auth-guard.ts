@@ -45,7 +45,38 @@ export async function authorizeRequest(
     };
   }
 
-  // --- 1. Production Mode (Supabase Configured) ---
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // --- Production Security Invariant: Demo mode & demo headers are strictly prohibited in production ---
+  if (isProduction) {
+    if (req.headers.get('x-demo-user-id')) {
+      return {
+        authorized: false,
+        errorResponse: NextResponse.json(
+          {
+            error:
+              'Forbidden: Demo identity headers (x-demo-user-id) are strictly prohibited in production mode. Real authenticated session required.',
+          },
+          { status: 403 }
+        ),
+      };
+    }
+
+    if (!isSupabaseConfigured()) {
+      return {
+        authorized: false,
+        errorResponse: NextResponse.json(
+          {
+            error:
+              'Production Configuration Invariant: Supabase authentication is mandatory in production environment. Demo mode fallback is prohibited in production under all circumstances.',
+          },
+          { status: 500 }
+        ),
+      };
+    }
+  }
+
+  // --- 1. Production / Authenticated Mode (Supabase Configured) ---
   if (isSupabaseConfigured()) {
     const authHeader = req.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -154,17 +185,14 @@ export async function authorizeRequest(
     return { authorized: true, member };
   }
 
-  // --- 2. Production Security Gate: Prevent silent demo fallback in production ---
-  const isProduction = process.env.NODE_ENV === 'production';
-  const isDemoExplicitlyAllowed = process.env.APP_MODE === 'demo' || !isProduction;
-
-  if (isProduction && !isDemoExplicitlyAllowed) {
+  // --- 2. Production Security Gate: Prohibit demo fallback in production under all circumstances ---
+  if (isProduction) {
     return {
       authorized: false,
       errorResponse: NextResponse.json(
         {
           error:
-            'Production Configuration Invariant: Supabase authentication is mandatory in production environment. Demo mode fallback is prohibited unless APP_MODE=demo.',
+            'Production Configuration Invariant: Supabase authentication is mandatory in production environment. Demo mode fallback is prohibited in production under all circumstances.',
         },
         { status: 500 }
       ),
