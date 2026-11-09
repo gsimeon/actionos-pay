@@ -80,12 +80,13 @@ jobs:
           test -f supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
           test -f supabase/migrations/00007_payment_idempotency_and_security_closure.sql || exit 1
           test -f supabase/migrations/00008_atomic_payment_reservation_and_capture_claims.sql || exit 1
-          echo "Checking essential stored procedures in migration 00006 and 00008..."
+          test -f supabase/migrations/00009_capture_state_alignment_and_security_hardening.sql || exit 1
+          echo "Checking essential stored procedures in migration 00006, 00008, and 00009..."
           grep -q "reconcile_payment_capture_atomic" supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
           grep -q "claim_webhook_event" supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
           grep -q "persist_approval_and_transition_atomic" supabase/migrations/00006_production_acceptance_and_reconciliation.sql || exit 1
           grep -q "reserve_payment_attempt_atomic" supabase/migrations/00008_atomic_payment_reservation_and_capture_claims.sql || exit 1
-          grep -q "claim_payment_capture_atomic" supabase/migrations/00008_atomic_payment_reservation_and_capture_claims.sql || exit 1
+          grep -q "claim_payment_capture_atomic" supabase/migrations/00009_capture_state_alignment_and_security_hardening.sql || exit 1
           echo "Migration integrity verified."
 
       - name: Install PostgreSQL Client
@@ -93,7 +94,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
 
-      - name: Execute Clean Standalone PostgreSQL Migration Upgrade (00001 -> 00002 -> 00003 -> 00004 -> 00005 -> 00006 -> 00007)
+      - name: Execute Clean Standalone PostgreSQL Migration Upgrade (00001 -> 00009)
         env:
           PGPASSWORD: test_password
         run: |
@@ -113,6 +114,8 @@ jobs:
           psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00007_payment_idempotency_and_security_closure.sql
           echo "Applying 00008_atomic_payment_reservation_and_capture_claims.sql (Phase 12 Upgrade)..."
           psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00008_atomic_payment_reservation_and_capture_claims.sql
+          echo "Applying 00009_capture_state_alignment_and_security_hardening.sql (Phase 13 Upgrade)..."
+          psql -h localhost -U test_user -d actionos_test -v ON_ERROR_STOP=1 -f supabase/migrations/00009_capture_state_alignment_and_security_hardening.sql
           echo "All migrations applied successfully to live PostgreSQL 15."
 
       - name: Run Live PostgreSQL Acceptance & RPC Test Suite

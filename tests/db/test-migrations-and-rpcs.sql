@@ -593,10 +593,19 @@ BEGIN
 
     -- Test 6G: Release capture claim
     PERFORM release_payment_capture_claim_atomic(v_attempt_id, 'approved', 'Simulated capture timeout');
+
+    -- Test 6H: Release capture claim as 'failed' (Phase 13 State Alignment)
+    PERFORM release_payment_capture_claim_atomic(v_attempt_id, 'failed', 'PayPal rejected capture: ORDER_NOT_APPROVED');
+
+    -- Test 6I: Calling claim_payment_capture_atomic on failed attempt returns FAILED
+    v_claim_json := claim_payment_capture_atomic('PAYPAL-ORD-P12-1', 60);
+    IF (v_claim_json->>'status') != 'FAILED' OR (v_claim_json->>'error_message') != 'PayPal rejected capture: ORDER_NOT_APPROVED' THEN
+      RAISE EXCEPTION 'Phase 13 Test Failed: Expected capture claim on failed attempt to return "FAILED", got "%"', v_claim_json;
+    END IF;
   END;
 
   RAISE NOTICE '=======================================================';
-  RAISE NOTICE 'All 27 ActionOS Pay Phase 12 Live Acceptance Tests PASSED!';
+  RAISE NOTICE 'All 29 ActionOS Pay Phase 13 Live Acceptance Tests PASSED!';
   RAISE NOTICE '=======================================================';
 END;
 $$;

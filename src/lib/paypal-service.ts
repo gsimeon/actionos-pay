@@ -292,6 +292,22 @@ export async function capturePayPalOrder(params: {
     orderId.startsWith('ORDER-SANDBOX-') ||
     Boolean(paymentAttempt.providerResponse?.is_simulated);
 
+  // Security Invariants for Simulated Payments:
+  // 1. In production, simulated orders can NEVER be captured under any circumstances.
+  if (process.env.NODE_ENV === 'production' && isSimulatedOrder) {
+    throw new Error('Production Security Invariant: Simulated payment orders cannot be captured in production.');
+  }
+
+  // 2. When real PayPal credentials exist, simulated captures are strictly prohibited.
+  if (creds && isSimulatedOrder) {
+    throw new Error('Security Invariant: Simulated orders cannot be captured when real PayPal credentials are configured.');
+  }
+
+  // 3. Simulated capture requires explicit simulation permission.
+  if (isSimulatedOrder && !isSimulationAllowed()) {
+    throw new Error('Simulation Invariant: Simulated payment capture is prohibited when simulation mode is disabled.');
+  }
+
   // 1. Real PayPal API Capture
   if (creds && !isSimulatedOrder) {
     try {
@@ -362,7 +378,7 @@ export async function capturePayPalOrder(params: {
   }
 
   // 2. Simulated Capture (for local demos/tests without PayPal credentials)
-  if (!isSimulationAllowed() && !isSimulatedOrder) {
+  if (!isSimulationAllowed()) {
     throw new Error('PayPal credentials missing and simulation mode is disabled.');
   }
 
