@@ -316,7 +316,7 @@ async function runConcurrencyTests() {
 
     await client1.query(`
       INSERT INTO procurement_requests (id, business_id, requester_id, requester_name, raw_prompt, budget_limit_cents, currency, status)
-      VALUES ('${testP12ReqId}', '${testBizId}', '${testRequesterId}', 'Phase 12 Requester', 100000, 'USD', 'approved');
+      VALUES ('${testP12ReqId}', '${testBizId}', '${testRequesterId}', 'Phase 12 Requester', 'Phase 12 Laptops', 100000, 'USD', 'approved');
 
       INSERT INTO quotes (id, request_id, business_id, supplier_id, supplier_name, version, subtotal_cents, tax_cents, shipping_cents, total_cents, currency, checksum_hash, status, expires_at)
       VALUES ('${testP12QuoteId}', '${testP12ReqId}', '${testBizId}', '${testSupplierId}', 'Phase 12 Hardware', 1, 90000, 6750, 2000, 98750, 'USD', 'p12-checksum', 'approved', now() + INTERVAL '1 day');
