@@ -15,6 +15,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Prompt must be a non-empty string.' }, { status: 400 });
     }
 
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length > 2000) {
+      return NextResponse.json(
+        { error: 'Prompt exceeds maximum permitted length of 2,000 characters.' },
+        { status: 400 }
+      );
+    }
+
     const requestedBusinessId =
       (body.businessId as string | undefined) ||
       req.headers.get('x-business-id') ||
@@ -80,7 +88,9 @@ export async function POST(req: Request) {
     });
   } catch (error: unknown) {
     console.error('Error in /api/procurement/plan:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: 'An unexpected error occurred while generating the procurement plan.' },
+      { status: 500 }
+    );
   }
 }

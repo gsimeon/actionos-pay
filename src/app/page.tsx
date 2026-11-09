@@ -810,7 +810,7 @@ export default function Home() {
                     <div className="flex flex-wrap items-center gap-2">
                       {structuredPlan.plannerSource === 'gemini' ? (
                         <span className="rounded-full bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-300 border border-violet-400/30">
-                          AI: Gemini ({structuredPlan.plannerModel || 'gemini-1.5-flash'})
+                          AI: Gemini ({structuredPlan.plannerModel || 'gemini-2.5-flash'})
                         </span>
                       ) : (
                         <span className="rounded-full bg-blue-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-blue-300 border border-blue-400/30">

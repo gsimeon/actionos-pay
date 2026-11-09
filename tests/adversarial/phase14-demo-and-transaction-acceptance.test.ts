@@ -95,7 +95,7 @@ describe('Phase 14: Final Demo & Transaction Acceptance Invariants', () => {
       (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
 
       expect(() => getApprovalSigningSecret()).toThrow(
-        'Production Security Invariant: The public demo signing secret from .env.example cannot be used in production or with live Supabase.'
+        'Security Invariant: The public demo signing secret from .env.example is permitted ONLY in local zero-config demo mode'
       );
     });
 
@@ -104,7 +104,7 @@ describe('Phase 14: Final Demo & Transaction Acceptance Invariants', () => {
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://prod-company.supabase.co';
 
       expect(() => getApprovalSigningSecret()).toThrow(
-        'Production Security Invariant: The public demo signing secret from .env.example cannot be used in production or with live Supabase.'
+        'Security Invariant: The public demo signing secret from .env.example is permitted ONLY in local zero-config demo mode'
       );
     });
   });

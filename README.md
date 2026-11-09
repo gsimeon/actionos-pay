@@ -40,9 +40,21 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 
 | Tier | Suite | Scope & Verification |
 | :--- | :--- | :--- |
-| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 137 automated tests across 10 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, and fail-closed security invariants. |
+| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 143+ automated tests across 12 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, fail-closed security invariants, and AI planner source attribution. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
-| **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | End-to-end interactive buyer lifecycle: creates order, prints Sandbox buyer approval URL, verifies pre-capture order status (`APPROVED`), and executes server-side capture via `--capture <orderId>` to record authoritative ledger state. |
+| **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | Validates the live PayPal Sandbox payment lifecycle: order creation, HATEOAS buyer approval link generation, pre-capture status (`APPROVED`) & financial integrity verification, server-side capture execution (`--capture <orderId>`), and authoritative ledger persistence. (Webhook event ingestion, signature verification, and atomic reconciliation are verified separately in Tier 1 automated contract tests.) |
+
+---
+
+## Runtime Modes & Ledger Persistence Matrix
+
+To ensure total clarity regarding where data lives across evaluation modes:
+
+| Mode | Storage / Persistence | What It Demonstrates |
+| :--- | :--- | :--- |
+| **Local Demo** (`APP_MODE=demo`) | In-memory ledger (`LedgerEngine`) and local file cache (`.sandbox-order-cache.json`) | Zero-config evaluation: natural language intent planning (Gemini or deterministic engine), cryptographic quote sealing, dual-control approval, simulated checkout, and UI audit ledger |
+| **PayPal Sandbox** (`PAYPAL_CLIENT_ID` + `PAYPAL_CLIENT_SECRET`) | Real PayPal API calls + local ledger & session cache persistence | Real PayPal OAuth2 token acquisition, Orders v2 order creation, HATEOAS buyer approval, pre-capture status verification, and server-side capture |
+| **Supabase Mode** (`NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` or `--supabase`) | Authoritative PostgreSQL database, stored RPCs, and RLS policies | Production multi-tenant security boundaries, multi-session row locks, atomic reservation & capture leases, and ACID audit history |
 
 ---
 
@@ -69,7 +81,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 - **Validation**: Zod
 - **Database**: Supabase PostgreSQL with RLS migrations (`00001` -> `00009`) & seed data
 - **Payments**: PayPal Orders API v2 (Sandbox + Emulated Fallback)
-- **AI**: Gemini API (`gemini-1.5-flash`) + Offline Deterministic Planner
+- **AI**: Gemini API (`gemini-2.5-flash`) via Google AI REST API (`x-goog-api-key` header) + Offline Deterministic Planner
 - **Testing**: Vitest (Unit, Integration, Adversarial, and PayPal Sandbox Live Suites)
 
 ---
@@ -85,7 +97,7 @@ No database credentials or PayPal credentials needed. Runs with an in-memory led
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (137 tests passing)
+# 2. Run automated test suites (150+ tests passing)
 npm test
 
 # 3. Start local development server

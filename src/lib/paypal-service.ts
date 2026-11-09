@@ -288,6 +288,82 @@ export async function getPayPalOrderDetails(orderId: string): Promise<Record<str
   return (await res.json()) as Record<string, unknown>;
 }
 
+export interface OrderIntegrityVerification {
+  valid: boolean;
+  error?: string;
+  unitAmount?: { currency_code: string; value: string };
+  referenceId?: string;
+  captures?: Array<{
+    id: string;
+    status: string;
+    amount?: { currency_code?: string; value?: string };
+  }>;
+}
+
+/**
+ * Validates the financial and identity integrity of a live PayPal order against an authoritative ledger attempt.
+ * Enforces fail-closed validation:
+ * 1. Must contain valid purchase_units array with at least one item.
+ * 2. Purchase unit must contain explicit amount value and currency code (rejects missing amounts fail-closed).
+ * 3. Amount and currency must exactly match paymentAttempt amount (formatted as decimal string) and currency.
+ * 4. If reference_id is present, it must match paymentAttempt.quoteId.
+ */
+export function verifyOrderFinancialIntegrity(
+  liveOrder: Record<string, unknown>,
+  paymentAttempt: PaymentAttempt
+): OrderIntegrityVerification {
+  const purchaseUnits = liveOrder.purchase_units as Array<Record<string, unknown>> | undefined;
+  if (!purchaseUnits || !Array.isArray(purchaseUnits) || purchaseUnits.length === 0) {
+    return { valid: false, error: 'Order is missing required purchase_units array.' };
+  }
+
+  const primaryUnit = purchaseUnits[0];
+  const amount = primaryUnit.amount as { currency_code?: string; value?: string } | undefined;
+  if (!amount || !amount.value || !amount.currency_code) {
+    return { valid: false, error: 'Order purchase_unit is missing required amount or currency_code breakdown.' };
+  }
+
+  const expectedValue = (paymentAttempt.amountCents / 100).toFixed(2);
+  if (amount.currency_code !== paymentAttempt.currency) {
+    return {
+      valid: false,
+      error: `Order currency mismatch: expected ${paymentAttempt.currency}, received ${amount.currency_code}.`,
+    };
+  }
+
+  if (amount.value !== expectedValue) {
+    return {
+      valid: false,
+      error: `Order amount mismatch: expected ${expectedValue} ${paymentAttempt.currency}, received ${amount.value} ${amount.currency_code}.`,
+    };
+  }
+
+  const referenceId = primaryUnit.reference_id as string | undefined;
+  if (referenceId && referenceId !== paymentAttempt.quoteId) {
+    return {
+      valid: false,
+      error: `Order reference_id mismatch: expected quote ${paymentAttempt.quoteId}, received ${referenceId}.`,
+    };
+  }
+
+  const payments = primaryUnit.payments as
+    | {
+        captures?: Array<{
+          id: string;
+          status: string;
+          amount?: { currency_code?: string; value?: string };
+        }>;
+      }
+    | undefined;
+
+  return {
+    valid: true,
+    unitAmount: { currency_code: amount.currency_code, value: amount.value },
+    referenceId,
+    captures: payments?.captures,
+  };
+}
+
 /**
  * Captures an approved PayPal order server-side with idempotency.
  * Never silently turns real capture failures into simulated success.
