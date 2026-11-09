@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { LedgerEngine } from '@/lib/ledger';
-import { capturePayPalOrder } from '@/lib/paypal-service';
+import { capturePayPalOrder, getPayPalCredentials } from '@/lib/paypal-service';
 import { authorizeRequest } from '@/lib/auth-guard';
 
 export async function POST(req: Request) {
@@ -18,6 +18,26 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: `Payment attempt not found for orderId "${orderId}".` },
         { status: 404 }
+      );
+    }
+
+    // Security Invariants: Prohibit simulated order capture in production or when PayPal credentials exist
+    const isSimulatedOrder =
+      orderId.startsWith('SIM-DEMO-ORD-') ||
+      orderId.startsWith('ORDER-SANDBOX-') ||
+      Boolean(paymentAttempt.providerResponse?.is_simulated);
+
+    if (process.env.NODE_ENV === 'production' && isSimulatedOrder) {
+      return NextResponse.json(
+        { error: 'Production Security Invariant: Simulated payment orders cannot be captured in production.' },
+        { status: 403 }
+      );
+    }
+
+    if (getPayPalCredentials() && isSimulatedOrder) {
+      return NextResponse.json(
+        { error: 'Security Invariant: Simulated orders cannot be captured when real PayPal credentials are configured.' },
+        { status: 403 }
       );
     }
 

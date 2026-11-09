@@ -229,7 +229,18 @@ describe('PayPal Sandbox Live External Acceptance Suite', () => {
       expect(result.reason).toContain('Missing required PayPal signature verification headers');
     });
 
-    it('verifies the 7-stage buyer-to-ledger transaction flow (live order creation, HATEOAS extraction & contract-verified webhook reconciliation)', async () => {
+    /**
+     * Tier 2 Acceptance Test: Live PayPal Orders v2 API Contract.
+     * Demonstrates:
+     * 1. Live order creation against PayPal Sandbox Orders v2 API with authentic client credentials.
+     * 2. Verification of live HATEOAS buyer approval link (sandbox.paypal.com/checkoutnow?token=...).
+     * 3. Authoritative ledger state seeding and contract-verified webhook processing (simulating the
+     *    PAYMENT.CAPTURE.COMPLETED payload contract).
+     *
+     * Note: Full end-to-end buyer checkout approval requires interactive browser authentication
+     * by a human Sandbox buyer account (Tier 3), documented in scripts/verify-paypal-sandbox.ts.
+     */
+    it('Tier 2 Acceptance: verifies live order creation, HATEOAS approval URL & contract-verified ledger reconciliation flow', async () => {
       const { LedgerEngine } = await import('@/lib/ledger');
       const { processWebhookEventRecordAsync } = await import('@/lib/webhook-processor');
 

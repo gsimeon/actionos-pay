@@ -376,6 +376,14 @@ async function runConcurrencyTests() {
     }
     console.log('✅ PASS: Atomic capture claim enforced mutual exclusion across sessions.');
 
+    // Release capture claim as 'failed' and verify state machine alignment
+    await client1.query(`SELECT release_payment_capture_claim_atomic($1, 'failed', 'Capture failed due to provider error')`, [attemptId]);
+    const failedClaimRes = await client1.query(`SELECT claim_payment_capture_atomic('PAYPAL-ORD-RACE-1', 60) AS res`);
+    if (failedClaimRes.rows[0].res.status !== 'FAILED') {
+      throw new Error(`State Machine Failure: Expected claim on failed payment to return FAILED, got ${failedClaimRes.rows[0].res.status}`);
+    }
+    console.log('✅ PASS: Failed payment capture state machine alignment verified in PostgreSQL.');
+
     console.log('\n===============================================================');
     console.log('🎉 ALL MULTI-SESSION POSTGRESQL CONCURRENCY TESTS PASSED 100%');
     console.log('===============================================================\n');
