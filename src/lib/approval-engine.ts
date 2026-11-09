@@ -32,11 +32,16 @@ export function safeTimingCompareHex(a: string, b: string): boolean {
   }
 }
 
+export const PUBLIC_DEMO_SIGNING_SECRET = 'c0ffee-demo-signing-secret-at-least-32-characters-long';
+
 /**
  * Retrieves the cryptographic secret key used for HMAC-SHA256 approval signing.
  * Requires APPROVAL_SIGNING_SECRET exclusively and fails closed if missing or below
  * minimum cryptographic strength (32 characters). Shared infrastructure keys
  * (such as SUPABASE_SERVICE_ROLE_KEY) or default secrets are strictly rejected.
+ *
+ * Security Invariant: The publicly-known demo secret from .env.example is permitted
+ * ONLY in local zero-config demo mode (APP_MODE=demo and NODE_ENV !== 'production' without remote Supabase).
  */
 export function getApprovalSigningSecret(): string {
   const secret = process.env.APPROVAL_SIGNING_SECRET;
@@ -46,7 +51,21 @@ export function getApprovalSigningSecret(): string {
       'Cryptographic Failure: Dedicated APPROVAL_SIGNING_SECRET (>= 32 chars) is required. Shared infrastructure keys (such as SUPABASE_SERVICE_ROLE_KEY) or weak fallback secrets are strictly prohibited.'
     );
   }
-  return secret.trim();
+
+  const trimmed = secret.trim();
+
+  // Security Invariant: Public demo template key is strictly prohibited in production or when live Supabase is configured
+  const isProduction = process.env.NODE_ENV === 'production';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const hasLiveSupabase = Boolean(supabaseUrl && !supabaseUrl.includes('your-project-ref') && !supabaseUrl.includes('localhost'));
+
+  if ((isProduction || hasLiveSupabase) && trimmed === PUBLIC_DEMO_SIGNING_SECRET) {
+    throw new Error(
+      'Production Security Invariant: The public demo signing secret from .env.example cannot be used in production or with live Supabase. Set a unique, randomly-generated APPROVAL_SIGNING_SECRET (>= 32 chars).'
+    );
+  }
+
+  return trimmed;
 }
 
 /**

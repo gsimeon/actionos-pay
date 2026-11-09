@@ -262,6 +262,33 @@ export interface CaptureOrderResult {
 }
 
 /**
+ * Retrieves details for a PayPal order directly from the Orders v2 API.
+ * Used for pre-capture verification of status, purchase units, and amount integrity.
+ */
+export async function getPayPalOrderDetails(orderId: string): Promise<Record<string, unknown>> {
+  const creds = getPayPalCredentials();
+  if (!creds) {
+    throw new Error('PayPal credentials are required to fetch live order details.');
+  }
+
+  const token = await getAccessToken(creds);
+  const res = await fetch(`${getBaseUrl(creds)}/v2/checkout/orders/${orderId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Failed to fetch PayPal order ${orderId} (HTTP ${res.status}): ${errorText}`);
+  }
+
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/**
  * Captures an approved PayPal order server-side with idempotency.
  * Never silently turns real capture failures into simulated success.
  */
@@ -276,23 +303,13 @@ export async function capturePayPalOrder(params: {
     idempotencyKey = `capture-${params.paymentAttempt.id}-${params.orderId}`,
   } = params;
 
-  // Check state machine: already captured
-  if (paymentAttempt.status === 'captured') {
-    return {
-      captureId: paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
-      status: 'COMPLETED',
-      paymentAttempt,
-      isSimulated: Boolean(paymentAttempt.providerResponse?.is_simulated),
-    };
-  }
-
   const creds = getPayPalCredentials();
   const isSimulatedOrder =
     orderId.startsWith('SIM-DEMO-ORD-') ||
     orderId.startsWith('ORDER-SANDBOX-') ||
     Boolean(paymentAttempt.providerResponse?.is_simulated);
 
-  // Security Invariants for Simulated Payments:
+  // Security Invariants for Simulated Payments (Defense-in-depth: Evaluated before replay returns):
   // 1. In production, simulated orders can NEVER be captured under any circumstances.
   if (process.env.NODE_ENV === 'production' && isSimulatedOrder) {
     throw new Error('Production Security Invariant: Simulated payment orders cannot be captured in production.');
@@ -306,6 +323,16 @@ export async function capturePayPalOrder(params: {
   // 3. Simulated capture requires explicit simulation permission.
   if (isSimulatedOrder && !isSimulationAllowed()) {
     throw new Error('Simulation Invariant: Simulated payment capture is prohibited when simulation mode is disabled.');
+  }
+
+  // Check state machine: already captured replay
+  if (paymentAttempt.status === 'captured') {
+    return {
+      captureId: paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
+      status: 'COMPLETED',
+      paymentAttempt,
+      isSimulated: Boolean(paymentAttempt.providerResponse?.is_simulated),
+    };
   }
 
   // 1. Real PayPal API Capture

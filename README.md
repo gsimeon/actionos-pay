@@ -30,6 +30,8 @@ ActionOS Pay solves this by decoupling **AI intent extraction** from **financial
 - **Terms**: Subtotal \$3,598.00 + 7.5% Nigerian VAT (\$269.85) + Insured Local Logistics (\$45.00) = **\$3,912.85 USD**.
 - **Payment Outcome**: Live PayPal Orders v2 Sandbox order creation, buyer approval URL generation, and server-side capture reconciliation.
 
+*(Note: The Lagos SME scenario incorporates illustrative 7.5% Nigerian VAT and local logistics calculations for demonstration; it represents a governed corporate procurement workflow rather than an exhaustive international tax-compliance engine.)*
+
 ---
 
 ## Three-Tier Acceptance Test Architecture
@@ -40,7 +42,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 | :--- | :--- | :--- |
 | **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 137 automated tests across 10 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, and fail-closed security invariants. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
-| **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | End-to-end interactive buyer lifecycle: creates order, prints Sandbox buyer approval URL, and executes `--capture <orderId>` post-approval to record authoritative ledger state. |
+| **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | End-to-end interactive buyer lifecycle: creates order, prints Sandbox buyer approval URL, verifies pre-capture order status (`APPROVED`), and executes server-side capture via `--capture <orderId>` to record authoritative ledger state. |
 
 ---
 
@@ -169,6 +171,5 @@ When `WEBHOOK_RECOVERY_URL` and `CRON_SECRET` are configured:
 
 - **Hackathon**: PayPal AI Hackathon 2026 (Devpost)
 - **Submission Deadline**: November 12, 2026 at 12:00 PM PT (9:00 PM WAT)
-- **Submission Track**: AI-Powered PayPal Commerce Solutions
-- **Demo Video**: [3-Minute YouTube Walkthrough](#) *(Lagos SME B2B procurement, dual-control approval, and PayPal Sandbox checkout)*
+- **Demo Video**: [3-Minute YouTube Walkthrough](#) *(Lagos SME B2B procurement, Gemini AI intent planning, dual-control approval, and PayPal Sandbox checkout — video link will be populated upon final Devpost submission)*
 - **License**: MIT

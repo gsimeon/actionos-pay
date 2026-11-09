@@ -82,6 +82,8 @@ export interface StructuredPlan {
   clarificationQuestions?: string[];
   suggestedSupplierId?: string;
   confidenceScore: number; // 0.0 - 1.0
+  plannerSource?: 'gemini' | 'deterministic';
+  plannerModel?: string;
 }
 
 export interface QuoteItem {

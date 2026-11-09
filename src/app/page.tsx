@@ -807,7 +807,16 @@ export default function Home() {
                       <span className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Structured AI Plan Output</span>
                       <h3 className="text-sm font-semibold text-white mt-0.5">{structuredPlan.summary}</h3>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {structuredPlan.plannerSource === 'gemini' ? (
+                        <span className="rounded-full bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-300 border border-violet-400/30">
+                          AI: Gemini ({structuredPlan.plannerModel || 'gemini-1.5-flash'})
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-blue-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-blue-300 border border-blue-400/30">
+                          Planner: Deterministic Catalogue Engine
+                        </span>
+                      )}
                       <span className="rounded-full bg-emerald-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-400/20">
                         Confidence: {(structuredPlan.confidenceScore * 100).toFixed(0)}%
                       </span>
