@@ -32,6 +32,17 @@ export function safeTimingCompareHex(a: string, b: string): boolean {
   }
 }
 
+function hasRealPayPalCredentialsConfigured(): boolean {
+  const cid = process.env.PAYPAL_CLIENT_ID;
+  const sec = process.env.PAYPAL_CLIENT_SECRET;
+  if (!cid || !sec) return false;
+  const isPlaceholderVal = (val: string) => {
+    const lower = val.trim().toLowerCase();
+    return lower === '' || lower.startsWith('your-') || lower.includes('your-paypal') || lower.includes('placeholder');
+  };
+  return !isPlaceholderVal(cid) && !isPlaceholderVal(sec);
+}
+
 export const PUBLIC_DEMO_SIGNING_SECRET = 'c0ffee-demo-signing-secret-at-least-32-characters-long';
 
 /**
@@ -41,7 +52,8 @@ export const PUBLIC_DEMO_SIGNING_SECRET = 'c0ffee-demo-signing-secret-at-least-3
  * (such as SUPABASE_SERVICE_ROLE_KEY) or default secrets are strictly rejected.
  *
  * Security Invariant: The publicly-known demo secret from .env.example is permitted
- * ONLY in local zero-config demo mode (APP_MODE=demo and NODE_ENV !== 'production' without remote Supabase).
+ * ONLY in local zero-config demo mode (APP_MODE=demo, non-production, no live PayPal credentials,
+ * no remote Supabase). Every other environment requires a unique generated secret.
  */
 export function getApprovalSigningSecret(): string {
   const secret = process.env.APPROVAL_SIGNING_SECRET;
@@ -54,14 +66,18 @@ export function getApprovalSigningSecret(): string {
 
   const trimmed = secret.trim();
 
-  // Security Invariant: Public demo template key is strictly prohibited in production or when live Supabase is configured
+  // Security Invariant: Public demo template key is strictly prohibited outside local offline demo mode
+  const isDemoMode = process.env.APP_MODE === 'demo';
   const isProduction = process.env.NODE_ENV === 'production';
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const hasLiveSupabase = Boolean(supabaseUrl && !supabaseUrl.includes('your-project-ref') && !supabaseUrl.includes('localhost'));
+  const hasRealPayPal = hasRealPayPalCredentialsConfigured();
 
-  if ((isProduction || hasLiveSupabase) && trimmed === PUBLIC_DEMO_SIGNING_SECRET) {
+  const isPermittedLocalDemo = isDemoMode && !isProduction && !hasLiveSupabase && !hasRealPayPal;
+
+  if (trimmed === PUBLIC_DEMO_SIGNING_SECRET && !isPermittedLocalDemo) {
     throw new Error(
-      'Production Security Invariant: The public demo signing secret from .env.example cannot be used in production or with live Supabase. Set a unique, randomly-generated APPROVAL_SIGNING_SECRET (>= 32 chars).'
+      'Security Invariant: The public demo signing secret from .env.example is permitted ONLY in local zero-config demo mode (APP_MODE=demo, non-production, no live PayPal credentials, no remote Supabase). Generate a unique APPROVAL_SIGNING_SECRET (>= 32 chars).'
     );
   }
 
