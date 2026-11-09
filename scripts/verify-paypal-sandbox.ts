@@ -21,6 +21,7 @@ import {
   getAccessToken,
   createPayPalOrder,
   capturePayPalOrder,
+  getPayPalOrderDetails,
 } from '../src/lib/paypal-service';
 import { computeApprovalSignature } from '../src/lib/approval-engine';
 import { computeQuoteChecksum } from '../src/lib/quote-engine';
@@ -96,7 +97,7 @@ async function runVerification() {
   const specifiedOrderId = captureIndex !== -1 && process.argv[captureIndex + 1] ? process.argv[captureIndex + 1] : null;
 
   if (specifiedOrderId) {
-    console.log(`\n[3/5] Resolving order "${specifiedOrderId}" from authoritative ledger...`);
+    console.log(`\n[3/6] Resolving order "${specifiedOrderId}" from authoritative ledger...`);
     const cache = loadOrderCache();
     let paymentAttempt = await LedgerEngine.getPaymentByOrderIdAsync(specifiedOrderId);
 
@@ -107,23 +108,52 @@ async function runVerification() {
     }
 
     if (!paymentAttempt) {
-      paymentAttempt = {
-        id: randomUUID(),
-        quoteId: randomUUID(),
-        businessId: DEMO_BUSINESS.id,
-        provider: 'paypal',
-        providerOrderId: specifiedOrderId,
-        amountCents: 194892,
-        currency: 'USD',
-        status: 'created',
-        idempotencyKey: `capture-${randomUUID()}`,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await LedgerEngine.savePaymentAttemptAsync(paymentAttempt);
+      console.error('\n❌ Acceptance Error: Unknown or Unverified Order ID');
+      console.error(`Order "${specifiedOrderId}" does not exist in the authoritative ledger or local session cache.`);
+      console.error('ActionOS Pay prohibits capturing arbitrary or manufactured orders.');
+      console.error('To run an acceptance test, first create an order with:');
+      console.error('  npx tsx scripts/verify-paypal-sandbox.ts\n');
+      process.exit(1);
     }
 
-    console.log(`[4/5] Acquiring atomic capture claim lease for order "${specifiedOrderId}"...`);
+    // Pre-capture verification directly against PayPal Orders v2 API
+    console.log(`[4/6] Verifying PayPal Orders v2 status for "${specifiedOrderId}"...`);
+    const liveOrder = await getPayPalOrderDetails(specifiedOrderId);
+    const liveStatus = liveOrder.status as string;
+    console.log(`  Live PayPal Order Status: ${liveStatus}`);
+
+    if (liveStatus !== 'APPROVED' && liveStatus !== 'COMPLETED') {
+      const links = liveOrder.links as Array<{ rel: string; href: string }> | undefined;
+      const approveLink = links?.find((l) => l.rel === 'approve')?.href;
+
+      console.log('\n========================================================================');
+      console.log('⚠️ LIVE CAPTURE NOT YET ELIGIBLE: AWAITING BUYER APPROVAL');
+      console.log('========================================================================');
+      console.log(`Order ID:          ${specifiedOrderId}`);
+      console.log(`Current Status:    ${liveStatus} (Requires "APPROVED" to execute capture)`);
+      if (approveLink) {
+        console.log(`Approve Link:      ${approveLink}`);
+      }
+      console.log('\nInstructions to Complete Acceptance:');
+      console.log('1. Open the HATEOAS Approve URL in your browser:');
+      if (approveLink) console.log(`   ${approveLink}`);
+      console.log('2. Log in with your Sandbox Buyer account and click "Complete Purchase".');
+      console.log(`3. Re-run: npx tsx scripts/verify-paypal-sandbox.ts --capture ${specifiedOrderId}`);
+      console.log('========================================================================\n');
+      return;
+    }
+
+    // Verify financial integrity: purchase unit value matches payment attempt
+    const purchaseUnit = (liveOrder.purchase_units as Array<{ amount?: { currency_code?: string; value?: string } }> | undefined)?.[0];
+    const unitAmount = purchaseUnit?.amount;
+    const expectedValue = (paymentAttempt.amountCents / 100).toFixed(2);
+    if (unitAmount && (unitAmount.currency_code !== paymentAttempt.currency || unitAmount.value !== expectedValue)) {
+      console.error('\n❌ Security Integrity Violation: Order amount or currency mismatch with ledger.');
+      console.error(`Expected: ${expectedValue} ${paymentAttempt.currency}, Received: ${unitAmount.value} ${unitAmount.currency_code}`);
+      process.exit(1);
+    }
+
+    console.log(`[5/6] Acquiring atomic capture claim lease for order "${specifiedOrderId}"...`);
     const claim = await LedgerEngine.claimPaymentCaptureAsync(specifiedOrderId, 60);
 
     if (claim.status === 'ALREADY_CAPTURED') {
@@ -147,7 +177,7 @@ async function runVerification() {
       return;
     }
 
-    console.log('[5/5] Invoking live PayPal capture API (/v2/checkout/orders/{id}/capture)...');
+    console.log('[6/6] Invoking live PayPal capture API (/v2/checkout/orders/{id}/capture)...');
     const captureResult = await capturePayPalOrder({
       orderId: specifiedOrderId,
       paymentAttempt,
@@ -163,13 +193,16 @@ async function runVerification() {
       }
 
       console.log('\n========================================================================');
-      console.log('🎉 TIER 3 ACCEPTANCE: LIVE PAYPAL ORDER CAPTURED & RECONCILED');
+      console.log('🎉 TIER 3 ACCEPTANCE: LIVE PAYPAL SANDBOX ORDER CAPTURED & PERSISTED');
       console.log('========================================================================');
       console.log(`Order ID:          ${specifiedOrderId}`);
       console.log(`Capture ID:        ${captureResult.captureId}`);
       console.log(`Status:            COMPLETED`);
       console.log(`Amount:            $${(paymentAttempt.amountCents / 100).toFixed(2)} ${paymentAttempt.currency}`);
-      console.log(`Ledger State:      Captured & Persisted Authoritatively`);
+      console.log(`Ledger State:      Captured & Persisted Authoritatively in Ledger`);
+      console.log('\nNote on Webhooks:');
+      console.log('  Live capture confirmation above was completed via synchronous PayPal API response.');
+      console.log('  Asynchronous webhook reconciliation is verified in Tier 1 contract test suite.');
       console.log('========================================================================\n');
       return;
     } else {

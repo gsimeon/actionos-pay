@@ -28,6 +28,8 @@ export const StructuredPlanSchema = z.object({
   clarificationQuestions: z.array(z.string()).optional(),
   suggestedSupplierId: z.string().optional(),
   confidenceScore: z.number().min(0).max(1),
+  plannerSource: z.enum(['gemini', 'deterministic']).optional(),
+  plannerModel: z.string().optional(),
 });
 
 /**
@@ -248,7 +250,8 @@ Return JSON strictly matching this schema:
   "confidenceScore": number between 0.0 and 1.0
 }`;
 
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const model = process.env.AI_MODEL || 'gemini-1.5-flash';
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -265,7 +268,12 @@ Return JSON strictly matching this schema:
         const rawJsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (rawJsonText) {
           const parsed = JSON.parse(rawJsonText);
-          return StructuredPlanSchema.parse(parsed);
+          const validated = StructuredPlanSchema.parse(parsed);
+          return {
+            ...validated,
+            plannerSource: 'gemini',
+            plannerModel: model,
+          };
         }
       }
     } catch (err) {
@@ -274,5 +282,10 @@ Return JSON strictly matching this schema:
   }
 
   // Fallback to deterministic NLP parser
-  return parseIntentOffline(prompt, businessBudgetLimitCents);
+  const offlinePlan = parseIntentOffline(prompt, businessBudgetLimitCents);
+  return {
+    ...offlinePlan,
+    plannerSource: 'deterministic',
+    plannerModel: 'deterministic-catalogue-parser',
+  };
 }
