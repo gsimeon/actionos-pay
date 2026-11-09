@@ -28,22 +28,40 @@ export function isPlaceholder(val?: string | null): boolean {
   );
 }
 
+export function validatePayPalEnv(rawEnv?: string | null): 'sandbox' | 'live' {
+  if (!rawEnv) return 'sandbox';
+  const normalized = rawEnv.trim().toLowerCase();
+  if (normalized === 'sandbox' || normalized === 'live') {
+    return normalized;
+  }
+  throw new Error(
+    `Invalid PAYPAL_ENV configuration: "${rawEnv}". Allowed values are strictly "sandbox" or "live".`
+  );
+}
+
 export function getPayPalCredentials(): PayPalCredentials | null {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !clientSecret) return null;
   if (isPlaceholder(clientId) || isPlaceholder(clientSecret)) return null;
+
+  const env = validatePayPalEnv(process.env.PAYPAL_ENV);
   return {
     clientId,
     clientSecret,
-    env: (process.env.PAYPAL_ENV as 'sandbox' | 'live') || 'sandbox',
+    env,
   };
 }
 
 export function isSimulationAllowed(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
   const creds = getPayPalCredentials();
   if (creds) return false; // When real credentials exist, simulation is strictly disallowed
-  return process.env.NODE_ENV !== 'production' || process.env.PAYPAL_ALLOW_SIMULATION === 'true';
+  return (
+    process.env.APP_MODE === 'demo' ||
+    process.env.NODE_ENV === 'test' ||
+    process.env.PAYPAL_ALLOW_SIMULATION === 'true'
+  );
 }
 
 function getBaseUrl(creds: PayPalCredentials): string {
@@ -392,7 +410,17 @@ export async function verifyWebhookSignature(params: {
 
   const hasRealWebhookId = Boolean(webhookId && !isPlaceholder(webhookId));
 
-  // 1. Mandatory Security Gate: Live, production, or non-demo mode require real credentials & webhook ID
+  // 1. Mandatory Security Gate: If real credentials exist, PAYPAL_WEBHOOK_ID is mandatory.
+  // Mock verification is strictly PROHIBITED whenever real PayPal credentials are present.
+  if (creds && !hasRealWebhookId) {
+    return {
+      verified: false,
+      reason:
+        'Security Fail-Closed: Real PayPal credentials (PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET) are configured but PAYPAL_WEBHOOK_ID is missing or placeholder. Mock verification is prohibited when PayPal credentials are configured.',
+    };
+  }
+
+  // 2. Mandatory Security Gate: Live, production, or non-demo mode require real credentials & webhook ID
   if (isProduction || isLiveEnv || !isDemoExplicitlyAllowed) {
     if (!creds || !hasRealWebhookId) {
       return {
@@ -403,7 +431,7 @@ export async function verifyWebhookSignature(params: {
     }
   }
 
-  // 2. Real cryptographic verification via PayPal API (when real credentials and webhook ID are present)
+  // 3. Real cryptographic verification via PayPal API (when real credentials and webhook ID are present)
   if (creds && hasRealWebhookId) {
     const requiredHeaders = [
       'paypal-auth-algo',
@@ -442,7 +470,7 @@ export async function verifyWebhookSignature(params: {
       });
 
       if (!res.ok) {
-        return { verified: false, reason: `Verification call returned HTTP ${res.status}` };
+        return { verified: false, reason: `PayPal verification service returned HTTP ${res.status}` };
       }
 
       const data = await res.json();
@@ -452,19 +480,20 @@ export async function verifyWebhookSignature(params: {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return { verified: false, reason: message };
+      return { verified: false, reason: `PayPal verification service unavailable: ${message}` };
     }
   }
 
-  // 3. Demo Mock Verification Gate:
+  // 4. Demo Mock Verification Gate:
   // Strictly permitted ONLY when:
+  // - NO real PayPal credentials exist (!creds)
   // - APP_MODE === 'demo'
   // - NODE_ENV !== 'production'
   // - creds?.env !== 'live'
-  if (!isDemoExplicitlyAllowed || isProduction || isLiveEnv) {
+  if (creds || !isDemoExplicitlyAllowed || isProduction || isLiveEnv) {
     return {
       verified: false,
-      reason: 'Live production or non-demo environment strictly prohibits mock signature verification.',
+      reason: 'Live production, non-demo, or credential-configured environment strictly prohibits mock signature verification.',
     };
   }
 

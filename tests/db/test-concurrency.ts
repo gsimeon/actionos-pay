@@ -307,6 +307,75 @@ async function runConcurrencyTests() {
     }
     console.log('✅ PASS: Lock contention and rollback isolation verified across sessions.');
 
+    // =========================================================================
+    // TEST 5: Concurrent Order Reservation & Capture Claim Stored Procedures
+    // =========================================================================
+    console.log('\n[Test 5] Testing Concurrent Order Reservation & Capture Claims...');
+    const testP12QuoteId = randomUUID();
+    const testP12ReqId = randomUUID();
+
+    await client1.query(`
+      INSERT INTO procurement_requests (id, business_id, requester_id, requester_name, raw_prompt, budget_limit_cents, currency, status)
+      VALUES ('${testP12ReqId}', '${testBizId}', '${testRequesterId}', 'Phase 12 Requester', 100000, 'USD', 'approved');
+
+      INSERT INTO quotes (id, request_id, business_id, supplier_id, supplier_name, version, subtotal_cents, tax_cents, shipping_cents, total_cents, currency, checksum_hash, status, expires_at)
+      VALUES ('${testP12QuoteId}', '${testP12ReqId}', '${testBizId}', '${testSupplierId}', 'Phase 12 Hardware', 1, 90000, 6750, 2000, 98750, 'USD', 'p12-checksum', 'approved', now() + INTERVAL '1 day');
+    `);
+
+    // Session 1 and Session 2 race to reserve the payment attempt
+    const reserveResults = await Promise.all([
+      client1.query(`SELECT reserve_payment_attempt_atomic($1, $2, $3, $4, $5, 120) AS res`, [
+        testP12QuoteId,
+        testBizId,
+        98750,
+        'USD',
+        'key-race-1',
+      ]),
+      client2.query(`SELECT reserve_payment_attempt_atomic($1, $2, $3, $4, $5, 120) AS res`, [
+        testP12QuoteId,
+        testBizId,
+        98750,
+        'USD',
+        'key-race-2',
+      ]),
+    ]);
+
+    const resStatus1 = reserveResults[0].rows[0].res.status;
+    const resStatus2 = reserveResults[1].rows[0].res.status;
+    console.log(`  Session 1 reservation: ${resStatus1}, Session 2 reservation: ${resStatus2}`);
+
+    const statuses = [resStatus1, resStatus2].sort();
+    if (statuses[0] !== 'IN_FLIGHT' || statuses[1] !== 'RESERVED') {
+      throw new Error(`Reservation Concurrency Failure: Expected exactly one RESERVED and one IN_FLIGHT, got [${resStatus1}, ${resStatus2}]`);
+    }
+    console.log('✅ PASS: Atomic order reservation enforced mutual exclusion across sessions.');
+
+    const reservedObj = resStatus1 === 'RESERVED' ? reserveResults[0].rows[0].res : reserveResults[1].rows[0].res;
+    const attemptId = reservedObj.payment_attempt_id;
+
+    // Confirm order
+    await client1.query(`SELECT confirm_payment_order_atomic($1, $2, $3)`, [
+      attemptId,
+      'PAYPAL-ORD-RACE-1',
+      JSON.stringify({ status: 'CREATED', id: 'PAYPAL-ORD-RACE-1' }),
+    ]);
+
+    // Session 1 and Session 2 race to claim capture
+    const claimResults = await Promise.all([
+      client1.query(`SELECT claim_payment_capture_atomic('PAYPAL-ORD-RACE-1', 60) AS res`),
+      client2.query(`SELECT claim_payment_capture_atomic('PAYPAL-ORD-RACE-1', 60) AS res`),
+    ]);
+
+    const claimStatus1 = claimResults[0].rows[0].res.status;
+    const claimStatus2 = claimResults[1].rows[0].res.status;
+    console.log(`  Session 1 capture claim: ${claimStatus1}, Session 2 capture claim: ${claimStatus2}`);
+
+    const claimStatuses = [claimStatus1, claimStatus2].sort();
+    if (claimStatuses[0] !== 'CLAIMED' || claimStatuses[1] !== 'IN_FLIGHT') {
+      throw new Error(`Capture Claim Concurrency Failure: Expected exactly one CLAIMED and one IN_FLIGHT, got [${claimStatus1}, ${claimStatus2}]`);
+    }
+    console.log('✅ PASS: Atomic capture claim enforced mutual exclusion across sessions.');
+
     console.log('\n===============================================================');
     console.log('🎉 ALL MULTI-SESSION POSTGRESQL CONCURRENCY TESTS PASSED 100%');
     console.log('===============================================================\n');

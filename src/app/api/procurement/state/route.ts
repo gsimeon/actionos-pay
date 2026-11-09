@@ -88,10 +88,9 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const isProduction = process.env.NODE_ENV === 'production';
-    const isDemoExplicitlyAllowed = process.env.APP_MODE === 'demo' || !isProduction;
 
-    // Strict Production Gate: Reset action is prohibited outside explicitly enabled demo mode
-    if (isProduction && !isDemoExplicitlyAllowed) {
+    // Strict Production Gate: Reset action is strictly prohibited in production environment under all circumstances
+    if (isProduction) {
       return NextResponse.json(
         { error: 'Prohibited: State reset is disabled in production environment.' },
         { status: 403 }

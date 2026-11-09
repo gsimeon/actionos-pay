@@ -507,8 +507,96 @@ BEGIN
     RAISE EXCEPTION 'Rollback Test Failed: Corrupted attempt altered procurement request status to "%"', v_req_status;
   END IF;
 
+  -- =========================================================================
+  -- 6. PHASE 12 ATOMIC ORDER RESERVATION & CAPTURE CLAIM TESTS
+  -- =========================================================================
+  RAISE NOTICE 'Testing Phase 12 Atomic Order Reservation and Capture Claim Stored Procedures...';
+
+  -- Create fresh quote and approval for reservation test
+  v_quote_id := gen_random_uuid();
+  INSERT INTO quotes (
+    id, request_id, business_id, supplier_id, supplier_name,
+    version, subtotal_cents, tax_cents, shipping_cents, total_cents,
+    currency, status, expires_at, created_at
+  ) VALUES (
+    v_quote_id, v_request_id, v_biz_id, v_supplier_id, 'Tech Supplies Inc.',
+    1, 50000, 3750, 2000, 55750,
+    'USD', 'approved', now() + INTERVAL '1 day', now()
+  );
+
+  DECLARE
+    v_res_json JSONB;
+    v_claim_json JSONB;
+    v_attempt_id UUID;
+  BEGIN
+    -- Test 6A: Atomic Order Reservation
+    v_res_json := reserve_payment_attempt_atomic(
+      v_quote_id,
+      v_biz_id,
+      55750,
+      'USD',
+      'order-test-res-key-1',
+      120
+    );
+
+    IF (v_res_json->>'status') != 'RESERVED' THEN
+      RAISE EXCEPTION 'Phase 12 Test Failed: Expected status "RESERVED", got "%"', v_res_json->>'status';
+    END IF;
+    v_attempt_id := (v_res_json->>'payment_attempt_id')::UUID;
+
+    -- Test 6B: Second concurrent reservation returns IN_FLIGHT
+    v_res_json := reserve_payment_attempt_atomic(
+      v_quote_id,
+      v_biz_id,
+      55750,
+      'USD',
+      'order-test-res-key-1',
+      120
+    );
+
+    IF (v_res_json->>'status') != 'IN_FLIGHT' THEN
+      RAISE EXCEPTION 'Phase 12 Test Failed: Expected concurrent reservation to return "IN_FLIGHT", got "%"', v_res_json->>'status';
+    END IF;
+
+    -- Test 6C: Confirm order with provider order ID
+    PERFORM confirm_payment_order_atomic(
+      v_attempt_id,
+      'PAYPAL-ORD-P12-1',
+      '{"status": "CREATED", "id": "PAYPAL-ORD-P12-1"}'::jsonb
+    );
+
+    -- Test 6D: Subsequent reservation request returns REPLAY
+    v_res_json := reserve_payment_attempt_atomic(
+      v_quote_id,
+      v_biz_id,
+      55750,
+      'USD',
+      'order-test-res-key-1',
+      120
+    );
+
+    IF (v_res_json->>'status') != 'REPLAY' OR (v_res_json->>'provider_order_id') != 'PAYPAL-ORD-P12-1' THEN
+      RAISE EXCEPTION 'Phase 12 Test Failed: Expected REPLAY with order "PAYPAL-ORD-P12-1", got "%"', v_res_json;
+    END IF;
+
+    -- Test 6E: Claim payment capture atomically
+    v_claim_json := claim_payment_capture_atomic('PAYPAL-ORD-P12-1', 60);
+    IF (v_claim_json->>'status') != 'CLAIMED' THEN
+      RAISE EXCEPTION 'Phase 12 Test Failed: Expected capture claim "CLAIMED", got "%"', v_claim_json->>'status';
+    END IF;
+
+    -- Test 6F: Second simultaneous capture claim returns IN_FLIGHT
+    v_claim_json := claim_payment_capture_atomic('PAYPAL-ORD-P12-1', 60);
+    IF (v_claim_json->>'status') != 'IN_FLIGHT' THEN
+      RAISE EXCEPTION 'Phase 12 Test Failed: Expected simultaneous capture claim to return "IN_FLIGHT", got "%"', v_claim_json->>'status';
+    END IF;
+
+    -- Test 6G: Release capture claim
+    PERFORM release_payment_capture_claim_atomic(v_attempt_id, 'approved', 'Simulated capture timeout');
+  END;
+
   RAISE NOTICE '=======================================================';
-  RAISE NOTICE 'All 20 ActionOS Pay Phase 10 Live Acceptance Tests PASSED!';
+  RAISE NOTICE 'All 27 ActionOS Pay Phase 12 Live Acceptance Tests PASSED!';
   RAISE NOTICE '=======================================================';
 END;
 $$;
