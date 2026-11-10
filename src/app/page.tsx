@@ -727,29 +727,29 @@ export default function Home() {
                 </div>
 
                 {/* Pre-set chips */}
-                <div className="flex flex-wrap gap-1.5">
-                  <span className="text-xs text-slate-600 dark:text-slate-400 self-center mr-1">Presets:</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 mr-1">Presets:</span>
                   <button
                     onClick={() => selectPreset('happy')}
-                    className="rounded-lg border border-slate-300 dark:border-white/10 bg-slate-100 dark:bg-white/5 px-2.5 py-1 text-xs text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-white transition font-medium"
+                    className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 hover:border-violet-500 hover:text-violet-900 dark:hover:text-white transition font-medium shadow-xs"
                   >
                     2 Laptops ($5k Limit)
                   </button>
                   <button
                     onClick={() => selectPreset('overbudget')}
-                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition font-medium"
+                    className="rounded-lg border border-amber-400 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-950/40 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition font-medium shadow-xs"
                   >
                     Over-Budget Breach
                   </button>
                   <button
                     onClick={() => selectPreset('unapproved')}
-                    className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 transition font-medium"
+                    className="rounded-lg border border-rose-400 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/40 px-3 py-1.5 text-xs text-rose-800 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition font-medium shadow-xs"
                   >
                     Unapproved Vendor
                   </button>
                   <button
                     onClick={() => selectPreset('monitors')}
-                    className="rounded-lg border border-slate-300 dark:border-white/10 bg-slate-100 dark:bg-white/5 px-2.5 py-1 text-xs text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 hover:text-violet-700 dark:hover:text-white transition font-medium"
+                    className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 hover:border-violet-500 hover:text-violet-900 dark:hover:text-white transition font-medium shadow-xs"
                   >
                     Monitors & Peripherals
                   </button>
@@ -758,25 +758,38 @@ export default function Home() {
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_200px]">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Purchase Instructions</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Purchase Instructions (Natural English)
+                    </label>
+                    <span className="text-[11px] text-violet-600 dark:text-violet-400 font-medium">
+                      ✏️ Fully editable — type custom requests or click presets
+                    </span>
+                  </div>
                   <textarea
                     rows={3}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder="e.g. Order 2 Dell XPS 15 laptops from AfriTech for our engineering team. Budget under $5,000."
-                    className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 transition shadow-xs"
+                    className="w-full rounded-2xl border-2 border-slate-300 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/90 px-4 py-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-violet-600 dark:focus:border-violet-400 focus:bg-white dark:focus:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition shadow-inner font-sans"
                   />
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    You can delete, edit, or type any new equipment requirement here.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Authorized Budget Cap ($)</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200">Authorized Cap</label>
+                    <span className="text-[11px] text-slate-500 font-medium">USD</span>
+                  </div>
                   <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400 text-sm font-semibold">$</span>
+                    <span className="absolute left-3.5 top-2.5 text-slate-700 dark:text-slate-300 text-sm font-bold">$</span>
                     <input
                       type="number"
                       value={budgetCap}
                       onChange={(e) => setBudgetCap(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 pl-7 pr-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 transition shadow-xs"
+                      className="w-full rounded-2xl border-2 border-slate-300 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/90 pl-8 pr-3 py-2.5 text-sm font-semibold text-slate-900 dark:text-slate-100 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-violet-600 dark:focus:border-violet-400 focus:bg-white dark:focus:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition shadow-inner"
                     />
                   </div>
                   <button
