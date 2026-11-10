@@ -23,18 +23,30 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
   const checks: PolicyCheckItem[] = [];
   const violations: string[] = [];
 
-  // 1. Supplier Approval Check
+  // 1. Supplier Approval & Tenant Ownership Check
   const supplier = getSupplierById(quote.supplierId);
+  const supplierExists = Boolean(supplier);
   const supplierApproved = Boolean(supplier && supplier.isApproved);
-  if (supplierApproved) {
+  const supplierMatchesTenant = Boolean(
+    supplier && (!supplier.businessId || supplier.businessId === quote.businessId)
+  );
+
+  if (supplier && supplierApproved && supplierMatchesTenant) {
     checks.push({
       code: 'SUPPLIER_APPROVED',
       name: 'Approved Vendor Verification',
       passed: true,
-      message: `Supplier "${supplier?.name}" is verified and active on the approved supplier list.`,
+      message: `Supplier "${supplier.name}" is verified, active, and authorized for business organization "${quote.businessId}".`,
     });
   } else {
-    const errorMsg = `Supplier "${supplier ? supplier.name : quote.supplierId}" is NOT an approved vendor (Risk rating: ${supplier?.riskRating || 'unknown'}). Purchases from unapproved suppliers are blocked.`;
+    let errorMsg: string;
+    if (!supplier) {
+      errorMsg = `Supplier "${quote.supplierId}" was not found in the approved supplier registry. Purchases from unrecognized vendors are blocked.`;
+    } else if (!supplierMatchesTenant) {
+      errorMsg = `Cross-tenant supplier violation: Supplier "${supplier.name}" belongs to business "${supplier.businessId}" and is NOT authorized for business "${quote.businessId}". Purchases across organizational boundaries are strictly prohibited.`;
+    } else {
+      errorMsg = `Supplier "${supplier.name}" is NOT an approved vendor (Risk rating: ${supplier.riskRating || 'unknown'}). Purchases from unapproved suppliers are blocked.`;
+    }
     checks.push({
       code: 'SUPPLIER_APPROVED',
       name: 'Approved Vendor Verification',

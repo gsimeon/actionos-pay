@@ -2,6 +2,7 @@
 // Provides deterministic fixtures matching supabase/seed.sql
 
 import { Business, Product, Supplier, TeamMember } from './types';
+import { fetchBusinessBudgetLimitFromSupabase, isSupabaseConfigured } from './supabase';
 
 export const DEMO_BUSINESS: Business = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -87,6 +88,16 @@ export const DEMO_SUPPLIERS: Supplier[] = [
     riskRating: 'high',
     country: 'AE',
     contactEmail: 'support@shadowtech.biz',
+  },
+  {
+    id: '00000000-0000-4000-8000-000000000400',
+    businessId: SECOND_TEST_BUSINESS.id,
+    name: 'Atlas Cloud Infrastructure FZE',
+    code: 'SUP-ATLAS-CLOUD',
+    isApproved: true,
+    riskRating: 'low',
+    country: 'AE',
+    contactEmail: 'sales@atlascloud.io',
   },
 ];
 
@@ -269,4 +280,28 @@ export function getBusinessBudgetLimitCents(businessId?: string): number {
     return 0;
   }
   return biz.budgetLimitCents;
+}
+
+/**
+ * Resolves the authoritative business spending ceiling asynchronously.
+ * In production Supabase mode, dynamically queries the database `businesses` table with RLS.
+ * In local demo mode, resolves from registered tenant fixtures with fail-closed security.
+ */
+export async function resolveAuthoritativeBusinessBudgetLimitAsync(
+  businessId?: string
+): Promise<number> {
+  if (!businessId) {
+    return DEMO_BUSINESS.budgetLimitCents;
+  }
+
+  if (isSupabaseConfigured()) {
+    const dbLimit = await fetchBusinessBudgetLimitFromSupabase(businessId);
+    if (typeof dbLimit === 'number' && dbLimit >= 0) {
+      return dbLimit;
+    }
+    // Fail-closed in Supabase mode if business does not exist or database read fails
+    return 0;
+  }
+
+  return getBusinessBudgetLimitCents(businessId);
 }

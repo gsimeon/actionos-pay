@@ -3,7 +3,7 @@ import { processApprovalDecision } from '@/lib/approval-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { verifyQuoteIntegrity } from '@/lib/quote-engine';
 import { authorizeRequest } from '@/lib/auth-guard';
-import { getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { getBusinessBudgetLimitCents, resolveAuthoritativeBusinessBudgetLimitAsync } from '@/lib/catalog';
 import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
     }
 
     const parentRequest = await LedgerEngine.getRequestAsync(quote.requestId);
-    const orgBudgetLimitCents = getBusinessBudgetLimitCents(quote.businessId);
+    const orgBudgetLimitCents = await resolveAuthoritativeBusinessBudgetLimitAsync(quote.businessId);
     const budgetLimitCents = parentRequest ? parentRequest.budgetLimitCents : orgBudgetLimitCents;
     const requesterId = parentRequest ? parentRequest.requesterId : undefined;
 

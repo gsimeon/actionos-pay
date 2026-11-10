@@ -8,24 +8,30 @@ import {
   DEMO_SUPPLIERS,
   getBusinessById,
   getBusinessBudgetLimitCents,
+  resolveAuthoritativeBusinessBudgetLimitAsync,
 } from '@/lib/catalog';
 import { Quote } from '@/lib/types';
 import { computeQuoteChecksum } from '@/lib/quote-engine';
 import { authorizeRequest } from '@/lib/auth-guard';
-import { resetSupabaseClientForTesting } from '@/lib/supabase';
+import { resetSupabaseClientForTesting, setSupabaseClientForTesting } from '@/lib/supabase';
 import { checkRateLimit, resetRateLimits } from '@/lib/rate-limiter';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sanitization', () => {
+describe('Phase 19 & 20: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sanitization', () => {
   const originalEnv = { ...process.env };
   const approver = DEMO_MEMBERS[1]; // Chidi Okonkwo (limit $15,000)
+
+  // Tenant A Supplier (AfriTech) & Tenant B Supplier (Atlas Cloud)
+  const supplierTenantA = DEMO_SUPPLIERS.find((s) => s.businessId === DEMO_BUSINESS.id)!;
+  const supplierTenantB = DEMO_SUPPLIERS.find((s) => s.businessId === SECOND_TEST_BUSINESS.id)!;
 
   // $4,500 quote (Passes Demo Business $10k ceiling; Fails Second Business $3k ceiling)
   const quoteMid: Quote = {
     id: 'quote-mid-4500',
     requestId: 'req-mid-4500',
     businessId: DEMO_BUSINESS.id,
-    supplierId: DEMO_SUPPLIERS[0].id,
-    supplierName: DEMO_SUPPLIERS[0].name,
+    supplierId: supplierTenantA.id,
+    supplierName: supplierTenantA.name,
     version: 1,
     subtotalCents: 450000, // $4,500.00
     taxCents: 0,
@@ -86,6 +92,17 @@ describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sa
       expect(getBusinessBudgetLimitCents(unknownTenantId)).toBe(0);
     });
 
+    it('resolveAuthoritativeBusinessBudgetLimitAsync retrieves database limit when Supabase is configured and fails closed on unknown tenant', async () => {
+      const limitA = await resolveAuthoritativeBusinessBudgetLimitAsync(DEMO_BUSINESS.id);
+      expect(limitA).toBe(1000000);
+
+      const limitB = await resolveAuthoritativeBusinessBudgetLimitAsync(SECOND_TEST_BUSINESS.id);
+      expect(limitB).toBe(300000);
+
+      const limitUnknown = await resolveAuthoritativeBusinessBudgetLimitAsync('unknown-tenant');
+      expect(limitUnknown).toBe(0);
+    });
+
     it('proves that two organisations with different limits receive different policy outcomes for the exact same $4,500 quote', () => {
       // 1. Tenant A (Apex Innovations Africa Ltd, $10,000 ceiling): $4,500 quote PASSES
       const policyTenantA = evaluatePolicy({
@@ -97,10 +114,12 @@ describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sa
       const budgetCheckA = policyTenantA.checks.find((c) => c.code === 'BUDGET_COMPLIANCE');
       expect(budgetCheckA?.passed).toBe(true);
 
-      // 2. Tenant B (Sahara Cloud Logistics Ltd, $3,000 ceiling): Same $4,500 quote FAILS CLOSED
+      // 2. Tenant B (Sahara Cloud Logistics Ltd, $3,000 ceiling, using its own supplier): Same $4,500 quote FAILS CLOSED
       const quoteTenantB: Quote = {
         ...quoteMid,
         businessId: SECOND_TEST_BUSINESS.id,
+        supplierId: supplierTenantB.id,
+        supplierName: supplierTenantB.name,
       };
       const policyTenantB = evaluatePolicy({
         quote: quoteTenantB,
@@ -130,7 +149,75 @@ describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sa
     });
   });
 
-  describe('2. Policy Engine Interface Hardening & Automatic Ceiling Resolution', () => {
+  describe('2. Multi-Tenant Supplier Ownership & Cross-Tenant Rejection (P1)', () => {
+    it('accepts quote when supplier belongs to the quote organization (Tenant A with Tenant A supplier)', () => {
+      const policyResult = evaluatePolicy({
+        quote: {
+          ...quoteMid,
+          businessId: DEMO_BUSINESS.id,
+          supplierId: supplierTenantA.id,
+          supplierName: supplierTenantA.name,
+        },
+        budgetLimitCents: 500000,
+      });
+
+      const supplierCheck = policyResult.checks.find((c) => c.code === 'SUPPLIER_APPROVED');
+      expect(supplierCheck?.passed).toBe(true);
+      expect(supplierCheck?.message).toContain('authorized for business organization');
+    });
+
+    it('rejects quote with cross-tenant violation when Tenant A attempts to use Tenant B supplier', () => {
+      const policyResult = evaluatePolicy({
+        quote: {
+          ...quoteMid,
+          businessId: DEMO_BUSINESS.id,
+          supplierId: supplierTenantB.id, // Atlas Cloud belongs to Sahara Cloud!
+          supplierName: supplierTenantB.name,
+        },
+        budgetLimitCents: 500000,
+      });
+
+      expect(policyResult.passed).toBe(false);
+      const supplierCheck = policyResult.checks.find((c) => c.code === 'SUPPLIER_APPROVED');
+      expect(supplierCheck?.passed).toBe(false);
+      expect(supplierCheck?.message).toContain('Cross-tenant supplier violation');
+      expect(supplierCheck?.message).toContain('Purchases across organizational boundaries are strictly prohibited');
+    });
+
+    it('rejects quote with cross-tenant violation when Tenant B attempts to use Tenant A supplier', () => {
+      const policyResult = evaluatePolicy({
+        quote: {
+          ...quoteMid,
+          businessId: SECOND_TEST_BUSINESS.id,
+          supplierId: supplierTenantA.id, // AfriTech belongs to Apex!
+          supplierName: supplierTenantA.name,
+        },
+        budgetLimitCents: 500000,
+      });
+
+      expect(policyResult.passed).toBe(false);
+      const supplierCheck = policyResult.checks.find((c) => c.code === 'SUPPLIER_APPROVED');
+      expect(supplierCheck?.passed).toBe(false);
+      expect(supplierCheck?.message).toContain('Cross-tenant supplier violation');
+    });
+
+    it('rejects quote with unknown supplier not in registry', () => {
+      const policyResult = evaluatePolicy({
+        quote: {
+          ...quoteMid,
+          supplierId: 'unregistered-fake-supplier-id',
+        },
+        budgetLimitCents: 500000,
+      });
+
+      expect(policyResult.passed).toBe(false);
+      const supplierCheck = policyResult.checks.find((c) => c.code === 'SUPPLIER_APPROVED');
+      expect(supplierCheck?.passed).toBe(false);
+      expect(supplierCheck?.message).toContain('was not found in the approved supplier registry');
+    });
+  });
+
+  describe('3. Policy Engine Interface Hardening & Automatic Ceiling Resolution', () => {
     it('automatically resolves authoritative organization ceiling when orgBudgetLimitCents is completely omitted', () => {
       // Create a $12,000 quote for Apex ($10,000 limit)
       const overCeilingQuote: Quote = {
@@ -169,11 +256,20 @@ describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sa
     });
   });
 
-  describe('3. Authentication Error Sanitization & Diagnostics', () => {
+  describe('4. Authentication Error Sanitization & Diagnostics (CI Isolated Mock)', () => {
     it('returns sanitized authentication error and correlationId without leaking internal Supabase details', async () => {
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://wycykgykpbtschrydtld.supabase.co';
       process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key-32-chars-minimum-here';
-      resetSupabaseClientForTesting();
+
+      // Mock Supabase client to simulate invalid/expired token without external WebSocket or network calls
+      setSupabaseClientForTesting({
+        auth: {
+          getUser: vi.fn().mockResolvedValue({
+            data: { user: null },
+            error: new Error('PGRST_JWT_EXPIRED: The access token has expired and signature is invalid'),
+          }),
+        },
+      } as unknown as SupabaseClient);
 
       const req = new Request('http://localhost/api/procurement/quote', {
         method: 'POST',
@@ -199,7 +295,7 @@ describe('Phase 19: Final Hackathon Acceptance, Multi-Tenant Isolation & Auth Sa
     });
   });
 
-  describe('4. Rate Limiter Governance & Specification', () => {
+  describe('5. Rate Limiter Governance & Specification', () => {
     it('enforces sliding window per key and correctly reports retryAfter and remaining count', () => {
       const key = 'test-phase19-rate-limit';
       const limit = 3;

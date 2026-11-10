@@ -70,6 +70,37 @@ export function resetSupabaseClientForTesting(): void {
   cachedSupabase = null;
 }
 
+export function setSupabaseClientForTesting(client: SupabaseClient | null): void {
+  cachedSupabase = client;
+}
+
+export async function fetchBusinessBudgetLimitFromSupabase(
+  businessId: string
+): Promise<number | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('budget_limit_cents')
+      .eq('id', businessId)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) console.error('Error fetching business budget limit from Supabase:', error);
+      return null;
+    }
+
+    return typeof data.budget_limit_cents === 'number'
+      ? data.budget_limit_cents
+      : parseInt(String(data.budget_limit_cents), 10) || null;
+  } catch (err) {
+    console.error('Exception fetching business budget limit from Supabase:', err);
+    return null;
+  }
+}
+
 export function isSupabaseConfigured(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key =

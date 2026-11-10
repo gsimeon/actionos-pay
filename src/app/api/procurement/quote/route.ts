@@ -3,7 +3,7 @@ import { evaluatePolicy } from '@/lib/policy-engine';
 import { calculateQuote, QuoteInputItem } from '@/lib/quote-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { authorizeRequest } from '@/lib/auth-guard';
-import { getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { getBusinessBudgetLimitCents, resolveAuthoritativeBusinessBudgetLimitAsync } from '@/lib/catalog';
 import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
 
-    const orgBudgetLimitCents = getBusinessBudgetLimitCents(procurementRequest.businessId);
+    const orgBudgetLimitCents = await resolveAuthoritativeBusinessBudgetLimitAsync(procurementRequest.businessId);
 
     const quote = calculateQuote({
       requestId,

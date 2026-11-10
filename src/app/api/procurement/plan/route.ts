@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parseProcurementIntent } from '@/lib/ai-planner';
-import { DEMO_BUSINESS, getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { DEMO_BUSINESS, getBusinessBudgetLimitCents, resolveAuthoritativeBusinessBudgetLimitAsync } from '@/lib/catalog';
 import { formatCurrency } from '@/lib/currency';
 import { LedgerEngine } from '@/lib/ledger';
 import { ProcurementRequest } from '@/lib/types';
@@ -62,8 +62,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Organization-level Authoritative Budget Ceiling Validation
-    const orgCeilingCents = getBusinessBudgetLimitCents(businessId);
+    // Organization-level Authoritative Budget Ceiling Validation (Supabase DB with RLS when active, fixtures in demo)
+    const orgCeilingCents = await resolveAuthoritativeBusinessBudgetLimitAsync(businessId);
 
     let effectiveBudgetLimitCents: number;
     if (budgetLimitCents !== undefined && budgetLimitCents !== null) {
