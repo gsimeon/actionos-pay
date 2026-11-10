@@ -647,6 +647,81 @@ export async function fetchProductsFromSupabase(businessId: string): Promise<Pro
 }
 
 /**
+ * Fetches a single supplier authoritatively from Supabase scoped to tenant
+ */
+export async function fetchSupplierByIdFromSupabase(
+  businessId: string,
+  supplierId: string
+): Promise<Supplier | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('*')
+      .eq('business_id', businessId)
+      .eq('id', supplierId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      businessId: data.business_id,
+      name: data.name,
+      code: data.code,
+      isApproved: data.is_approved,
+      riskRating: data.risk_rating,
+      country: data.country,
+      contactEmail: data.contact_email,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches a single product authoritatively from Supabase scoped to tenant by SKU or ID
+ */
+export async function fetchProductByIdOrSkuFromSupabase(
+  businessId: string,
+  identifier: { id?: string; sku?: string }
+): Promise<Product | null> {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  try {
+    let query = supabase.from('products').select('*').eq('business_id', businessId);
+    if (identifier.sku) {
+      query = query.ilike('sku', identifier.sku);
+    } else if (identifier.id) {
+      query = query.eq('id', identifier.id);
+    } else {
+      return null;
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return null;
+
+    return {
+      id: data.id,
+      businessId: data.business_id,
+      supplierId: data.supplier_id,
+      sku: data.sku,
+      name: data.name,
+      description: data.description,
+      category: data.category,
+      unitPriceCents: Number(data.unit_price_cents),
+      currency: data.currency,
+      inStock: data.in_stock,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Authoritatively fetches a webhook event record from Supabase by provider eventId
  */
 export async function fetchWebhookFromSupabase(eventId: string): Promise<WebhookEventRecord | null> {

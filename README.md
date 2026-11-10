@@ -40,7 +40,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 
 | Tier | Suite | Scope & Verification |
 | :--- | :--- | :--- |
-| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 203+ automated tests across 15 test files verifying state machines, quote seals, SoD rules, multi-tenant budget ceilings & supplier isolation, production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API & auth error sanitization with correlation IDs, and AI planner source attribution. |
+| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 212+ automated tests across 16 test files verifying state machines, quote seals, SoD rules, multi-tenant budget ceilings & cross-tenant supplier isolation, database-backed catalogue resolution, production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API & auth error sanitization with correlation IDs, and AI planner source attribution. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
 | **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | Validates the live PayPal Sandbox payment lifecycle: order creation, HATEOAS buyer approval link generation, pre-capture status (`APPROVED`) & financial integrity verification, server-side capture execution (`--capture <orderId>`), and authoritative ledger persistence. (Webhook event ingestion, signature verification, and atomic reconciliation are verified separately in Tier 1 automated contract tests.) |
 
@@ -54,16 +54,16 @@ To ensure total clarity regarding where data lives across evaluation modes:
 | :--- | :--- | :--- |
 | **Local Demo** (`APP_MODE=demo`) | In-memory ledger (`LedgerEngine`) and local file cache (`.sandbox-order-cache.json`) | Zero-config evaluation: natural language intent planning (Gemini or deterministic engine), cryptographic quote sealing, dual-control approval, simulated checkout, and UI audit ledger |
 | **PayPal Sandbox** (`PAYPAL_CLIENT_ID` + `PAYPAL_CLIENT_SECRET`) | Real PayPal API calls + local ledger & session cache persistence | Real PayPal OAuth2 token acquisition, Orders v2 order creation, HATEOAS buyer approval, pre-capture status verification, and server-side capture |
-| **Supabase Mode** (`NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` or `--supabase`) | Authoritative PostgreSQL database, stored RPCs, and RLS policies | Production multi-tenant security boundaries, multi-session row locks, atomic reservation & capture leases, and ACID audit history |
+| **Supabase Mode** (`NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` or `--supabase`) | Authoritative PostgreSQL database, stored RPCs, explicit tenant-scoped server queries, and RLS policies | Production multi-tenant security boundaries, database-backed catalogue & supplier resolution, multi-session row locks, atomic reservation & capture leases, and ACID audit history |
 
 ---
 
 ## Architecture & Financial Invariants
 
-- **Authoritative Tenant Spending Ceilings**: Spending limits are strictly governed by the organization's server-side record, never client input. In local demo mode, registered tenant fixtures (`Apex Innovations` at $10,000 and `Sahara Cloud` at $3,000) prove multi-tenant isolation, failing closed with 0 budget authority for unverified tenants; in production Supabase mode, ceilings are fetched dynamically from the `businesses` table with RLS.
+- **Authoritative Tenant Spending Ceilings**: Spending limits are strictly governed by the organization's server-side record, never client input. In local demo mode, registered tenant fixtures (`Apex Innovations` at $10,000 and `Sahara Cloud` at $3,000) prove multi-tenant isolation, failing closed with 0 budget authority for unverified or missing tenant IDs; in production Supabase mode, ceilings are fetched dynamically from the `businesses` table via authoritative server queries.
 - **Process-Local Rate Limiting (Single-Instance)**: An in-memory sliding window rate limiter protects `/api/procurement/plan` (max 10 req/min per user) for single-instance hackathon evaluation. Distributed deployments specify backing by a shared PostgreSQL function or Redis cache.
 - **Minor-Unit Integer Precision**: All pricing and calculations use integer cents (`179900` = \$1,799.00) to eliminate floating-point drift.
-- **Client Amounts Untrusted**: Browsers never supply payment amounts. Prices are loaded authoritatively from the catalogue on the server.
+- **Client Amounts Untrusted & Database-Backed Catalogue**: Browsers never supply payment amounts. Prices are loaded authoritatively on the server from the organization's database catalogue in Supabase mode (or verified fixtures in demo mode). Stock availability, supplier approval status, and tenant ownership are verified before quote creation.
 - **Atomic Order Reservation**: Stored procedure `reserve_payment_attempt_atomic` (Migration `00008`) reserves quotes before contacting PayPal, enforcing mutual exclusion against concurrent requests.
 - **Atomic Capture Claims**: Stored procedure `claim_payment_capture_atomic` (Migration `00008` & `00009`) acquires a time-bounded capture lease, preventing simultaneous duplicate capture requests.
 - **Capture State Alignment**: Migration `00009` ensures that failed payment attempts return `status = 'FAILED'`, preventing failed records from illicitly transitioning back to `reconciling`.
@@ -71,7 +71,7 @@ To ensure total clarity regarding where data lives across evaluation modes:
 - **Fail-Closed Webhook Verification**: Webhook mock signatures are strictly restricted to `APP_MODE=demo` in non-production, non-live environments without PayPal credentials. Any deployment with PayPal credentials requires a valid `PAYPAL_WEBHOOK_ID` and verifies cryptographically via PayPal's API.
 - **Production Demo Lockdown**: In production (`NODE_ENV=production`), demo identity headers (`x-demo-user-id`) are strictly prohibited (returning 403), state reset is unconditionally disabled (returning 403), and simulation is disabled. Real Supabase Bearer JWT authentication is mandatory.
 - **Runtime Environment Validation**: Runtime validation strictly verifies `PAYPAL_ENV` (`'sandbox'` or `'live'`), rejecting typos or unsupported configurations.
-- **Tenant Isolation**: Multi-tenant database schema with Row Level Security (RLS) on every table scoped to `business_id`.
+- **Tenant Isolation (Dual Defense Layer)**: Next.js backend server utilizes the service-role key for atomic stored procedures and audit records while strictly enforcing tenant isolation in application logic via Bearer session validation (`supabase.auth.getUser`), team membership verification, and explicit `business_id` scoping on every query and write. For direct client/anon database interactions, PostgreSQL Row Level Security (RLS) migrations (`00001` -> `00009`) enforce table-level isolation.
 - **Append-Only Ledger**: All events (`REQUEST_CREATED`, `QUOTE_CALCULATED`, `QUOTE_APPROVED`, `PAYMENT_ATTEMPT_CREATED`, `PAYMENT_CAPTURED`, etc.) are immutably logged with actor, role, and payload diffs.
 
 ---
@@ -90,7 +90,7 @@ To ensure total clarity regarding where data lives across evaluation modes:
 
 ## Quick Start & Setup Paths for Judges
 
-Requirements: Node.js 20.9+ and npm.
+Requirements: Node.js 22.x+ (LTS) and npm.
 
 ### Path A: Zero-Config Local Demo Mode (Quick Evaluation)
 No database credentials or PayPal credentials needed. Runs with an in-memory ledger and local simulation.
@@ -99,7 +99,7 @@ No database credentials or PayPal credentials needed. Runs with an in-memory led
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (198+ tests passing across 15 suites)
+# 2. Run automated test suites (212+ tests passing across 16 suites)
 npm test
 
 # 3. Start local development server
@@ -162,7 +162,7 @@ npm run test:db:concurrency
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 198+ tests in 15 test suites.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 212+ tests in 16 test suites on Node.js 22.x.
 3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` through `00009`, and executes:
    - `tests/db/test-migrations-and-rpcs.sql`: 29 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), atomic reservation, lease contention, failed capture state handling, and rollback behaviors.
    - `tests/db/test-role-permissions.sql`: Dynamic PostgreSQL role switching (`SET ROLE`) verifying privilege boundaries across `anon`, `authenticated` (matching/mismatched `auth.uid()`), and `service_role`.

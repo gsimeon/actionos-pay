@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { evaluatePolicy } from '@/lib/policy-engine';
-import { calculateQuote, QuoteInputItem } from '@/lib/quote-engine';
+import { calculateQuoteAsync, QuoteInputItem } from '@/lib/quote-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { authorizeRequest } from '@/lib/auth-guard';
 import { getBusinessBudgetLimitCents, resolveAuthoritativeBusinessBudgetLimitAsync } from '@/lib/catalog';
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
 
     const orgBudgetLimitCents = await resolveAuthoritativeBusinessBudgetLimitAsync(procurementRequest.businessId);
 
-    const quote = calculateQuote({
+    const quote = await calculateQuoteAsync({
       requestId,
       businessId: procurementRequest.businessId,
       supplierId,

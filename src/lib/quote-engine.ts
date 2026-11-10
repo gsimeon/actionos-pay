@@ -5,7 +5,13 @@
 // 3. Produces an immutable SHA-256 integrity checksum sealing the quote version and terms.
 
 import { createHash, randomUUID } from 'crypto';
-import { getProductById, getProductBySku, getSupplierById } from './catalog';
+import {
+  getProductById,
+  getProductBySku,
+  getSupplierById,
+  resolveAuthoritativeProductAsync,
+  resolveAuthoritativeSupplierAsync,
+} from './catalog';
 import { calculateLineTotal, calculateTax } from './currency';
 import { Quote, QuoteItem } from './types';
 
@@ -115,6 +121,120 @@ export function calculateQuote(params: GenerateQuoteParams): Quote {
       throw new Error(
         `Product "${product.name}" (${product.sku}) belongs to supplier "${product.supplierId}", not selected supplier "${supplierId}".`
       );
+    }
+
+    const lineTotalCents = calculateLineTotal(itemInput.quantity, product.unitPriceCents);
+    subtotalCents += lineTotalCents;
+
+    quoteItems.push({
+      id: randomUUID(),
+      quoteId,
+      productId: product.id,
+      sku: product.sku,
+      itemName: product.name,
+      quantity: itemInput.quantity,
+      unitPriceCents: product.unitPriceCents,
+      totalCents: lineTotalCents,
+    });
+  }
+
+  const taxCents = calculateTax(subtotalCents, taxBasisPoints);
+  const totalCents = subtotalCents + taxCents + shippingCents;
+  const currency = 'USD';
+
+  const checksumHash = computeQuoteChecksum({
+    requestId,
+    version,
+    supplierId,
+    totalCents,
+    currency,
+    items: quoteItems,
+  });
+
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  return {
+    id: quoteId,
+    requestId,
+    businessId,
+    supplierId,
+    supplierName: supplier.name,
+    version,
+    items: quoteItems,
+    subtotalCents,
+    taxCents,
+    shippingCents,
+    totalCents,
+    currency,
+    checksumHash,
+    status: 'active',
+    expiresAt,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Authoritatively calculates a Quote asynchronously.
+ * In Supabase mode, dynamically verifies products & suppliers from the database scoped to businessId.
+ * In local demo mode, resolves from registered fixtures scoped to businessId.
+ * Validates stock, supplier approval, supplier matching, positive integer quantities, and seals with SHA-256 hash.
+ */
+export async function calculateQuoteAsync(params: GenerateQuoteParams): Promise<Quote> {
+  const {
+    requestId,
+    businessId,
+    supplierId,
+    version = 1,
+    items: rawItems,
+    taxBasisPoints = 750, // 7.5% standard tax
+    shippingCents = 4500, // $45.00 flat insured freight
+  } = params;
+
+  if (!businessId) {
+    throw new Error('businessId is required for authoritative quote generation.');
+  }
+
+  const supplier = await resolveAuthoritativeSupplierAsync(businessId, supplierId);
+  if (!supplier) {
+    throw new Error(`Supplier with ID "${supplierId}" not found for organization "${businessId}".`);
+  }
+
+  if (!supplier.isApproved) {
+    throw new Error(`Supplier "${supplier.name}" (${supplierId}) is not approved for procurement.`);
+  }
+
+  if (!rawItems || rawItems.length === 0) {
+    throw new Error('Quote must contain at least one item.');
+  }
+
+  const quoteId = randomUUID();
+  const quoteItems: QuoteItem[] = [];
+  let subtotalCents = 0;
+
+  for (const itemInput of rawItems) {
+    if (itemInput.quantity <= 0 || !Number.isInteger(itemInput.quantity)) {
+      throw new Error(`Invalid item quantity: ${itemInput.quantity}. Must be positive integer.`);
+    }
+
+    const product = await resolveAuthoritativeProductAsync(businessId, {
+      sku: itemInput.sku,
+      productId: itemInput.productId,
+    });
+
+    if (!product) {
+      throw new Error(
+        `Product not found for SKU: "${itemInput.sku}" or ID: "${itemInput.productId}" in organization "${businessId}".`
+      );
+    }
+
+    if (product.supplierId !== supplierId) {
+      throw new Error(
+        `Product "${product.name}" (${product.sku}) belongs to supplier "${product.supplierId}", not selected supplier "${supplierId}".`
+      );
+    }
+
+    if (!product.inStock) {
+      throw new Error(`Product "${product.name}" (${product.sku}) is currently out of stock.`);
     }
 
     const lineTotalCents = calculateLineTotal(itemInput.quantity, product.unitPriceCents);

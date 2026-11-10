@@ -2,7 +2,12 @@
 // Provides deterministic fixtures matching supabase/seed.sql
 
 import { Business, Product, Supplier, TeamMember } from './types';
-import { fetchBusinessBudgetLimitFromSupabase, isSupabaseConfigured } from './supabase';
+import {
+  fetchBusinessBudgetLimitFromSupabase,
+  fetchProductByIdOrSkuFromSupabase,
+  fetchSupplierByIdFromSupabase,
+  isSupabaseConfigured,
+} from './supabase';
 
 export const DEMO_BUSINESS: Business = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -266,13 +271,14 @@ export function searchProducts(term: string): Product[] {
 }
 
 export function getBusinessById(businessId?: string): Business | undefined {
-  if (!businessId) return DEMO_BUSINESS;
-  return REGISTERED_BUSINESSES.find((b) => b.id === businessId);
+  if (!businessId || typeof businessId !== 'string' || !businessId.trim()) return undefined;
+  return REGISTERED_BUSINESSES.find((b) => b.id === businessId.trim());
 }
 
 export function getBusinessBudgetLimitCents(businessId?: string): number {
-  if (!businessId) {
-    return DEMO_BUSINESS.budgetLimitCents;
+  if (!businessId || typeof businessId !== 'string' || !businessId.trim()) {
+    // Fail-closed security invariant: Missing or empty tenant ID has 0 spending authority
+    return 0;
   }
   const biz = getBusinessById(businessId);
   if (!biz) {
@@ -284,18 +290,22 @@ export function getBusinessBudgetLimitCents(businessId?: string): number {
 
 /**
  * Resolves the authoritative business spending ceiling asynchronously.
- * In production Supabase mode, dynamically queries the database `businesses` table with RLS.
+ * In production Supabase mode, dynamically queries the database `businesses` table.
  * In local demo mode, resolves from registered tenant fixtures with fail-closed security.
+ * Invariant: Missing, null, or empty tenant ID fails closed with 0 budget authority.
  */
 export async function resolveAuthoritativeBusinessBudgetLimitAsync(
   businessId?: string
 ): Promise<number> {
-  if (!businessId) {
-    return DEMO_BUSINESS.budgetLimitCents;
+  if (!businessId || typeof businessId !== 'string' || !businessId.trim()) {
+    // Fail-closed security invariant: Missing or empty tenant ID has 0 spending authority
+    return 0;
   }
 
+  const cleanBusinessId = businessId.trim();
+
   if (isSupabaseConfigured()) {
-    const dbLimit = await fetchBusinessBudgetLimitFromSupabase(businessId);
+    const dbLimit = await fetchBusinessBudgetLimitFromSupabase(cleanBusinessId);
     if (typeof dbLimit === 'number' && dbLimit >= 0) {
       return dbLimit;
     }
@@ -303,5 +313,53 @@ export async function resolveAuthoritativeBusinessBudgetLimitAsync(
     return 0;
   }
 
-  return getBusinessBudgetLimitCents(businessId);
+  return getBusinessBudgetLimitCents(cleanBusinessId);
+}
+
+/**
+ * Resolves a supplier authoritatively for an organization.
+ * In Supabase mode, queries database scoped to business_id (fail-closed, never falling back to demo fixtures).
+ * In local demo mode, resolves from registered fixtures scoped to business_id.
+ */
+export async function resolveAuthoritativeSupplierAsync(
+  businessId: string,
+  supplierId: string
+): Promise<Supplier | undefined> {
+  if (!businessId || !supplierId) return undefined;
+
+  if (isSupabaseConfigured()) {
+    const dbSupplier = await fetchSupplierByIdFromSupabase(businessId, supplierId);
+    return dbSupplier || undefined;
+  }
+
+  return DEMO_SUPPLIERS.find(
+    (s) => s.id === supplierId && (!s.businessId || s.businessId === businessId)
+  );
+}
+
+/**
+ * Resolves a product authoritatively for an organization from its catalogue.
+ * In Supabase mode, queries database scoped to business_id (fail-closed).
+ * In local demo mode, resolves from registered fixtures scoped to business_id.
+ */
+export async function resolveAuthoritativeProductAsync(
+  businessId: string,
+  item: { sku?: string; productId?: string }
+): Promise<Product | undefined> {
+  if (!businessId || (!item.sku && !item.productId)) return undefined;
+
+  if (isSupabaseConfigured()) {
+    const dbProduct = await fetchProductByIdOrSkuFromSupabase(businessId, {
+      id: item.productId,
+      sku: item.sku,
+    });
+    return dbProduct || undefined;
+  }
+
+  return DEMO_PRODUCTS.find((p) => {
+    const matchesSku = item.sku && p.sku.toLowerCase() === item.sku.toLowerCase();
+    const matchesId = item.productId && p.id === item.productId;
+    const matchesTenant = !p.businessId || p.businessId === businessId;
+    return (matchesSku || matchesId) && matchesTenant;
+  });
 }

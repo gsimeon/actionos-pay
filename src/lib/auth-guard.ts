@@ -169,7 +169,7 @@ export async function authorizeRequest(
         authorized: false,
         errorResponse: NextResponse.json(
           {
-            error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}".`,
+            error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}". Cross-tenant operations are strictly prohibited.`,
           },
           { status: 403 }
         ),
@@ -237,7 +237,9 @@ export async function authorizeRequest(
     return {
       authorized: false,
       errorResponse: NextResponse.json(
-        { error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}".` },
+        {
+          error: `Approver "${member.userName}" does not belong to business "${resolvedTargetBusinessId}". Cross-tenant operations are strictly prohibited.`,
+        },
         { status: 403 }
       ),
     };
