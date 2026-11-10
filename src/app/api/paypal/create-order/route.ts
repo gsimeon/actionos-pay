@@ -15,21 +15,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'quoteId is required.' }, { status: 400 });
     }
 
-    // Authoritative lookup from database/ledger
-    const quote = await LedgerEngine.getQuoteAsync(quoteId);
-    if (!quote) {
-      return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
-    }
-
-    // Authorize caller against quote's business organization
+    // 1. Authenticate caller session first (enforces Bearer token in Supabase mode before DB probing)
     const auth = await authorizeRequest(
       req,
-      quote.businessId,
+      undefined,
       ['requester', 'approver', 'admin'],
       callerUserId
     );
     if (!auth.authorized) {
       return auth.errorResponse!;
+    }
+
+    // 2. Authoritative lookup from database/ledger
+    const quote = await LedgerEngine.getQuoteAsync(quoteId);
+    if (!quote) {
+      return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
+    }
+
+    // 3. Strict tenant boundary: Caller must belong to quote's organization
+    if (auth.member && auth.member.businessId !== quote.businessId) {
+      return NextResponse.json(
+        {
+          error: `Forbidden: User belongs to business "${auth.member.businessId}", which does not match the quote organization "${quote.businessId}".`,
+        },
+        { status: 403 }
+      );
     }
 
     // Expiry check

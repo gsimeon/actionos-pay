@@ -4,9 +4,9 @@
 // Any change to the quote invalidates the approval.
 
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
-import { evaluatePolicy } from './policy-engine';
+import { evaluatePolicy, evaluatePolicyAsync } from './policy-engine';
 import { verifyQuoteIntegrity } from './quote-engine';
-import { Approval, Quote, TeamMember } from './types';
+import { Approval, Quote, Supplier, TeamMember } from './types';
 
 export interface CreateApprovalParams {
   quote: Quote;
@@ -16,6 +16,7 @@ export interface CreateApprovalParams {
   budgetLimitCents: number;
   orgBudgetLimitCents?: number;
   requesterId?: string;
+  supplier?: Supplier;
 }
 
 /**
@@ -209,6 +210,64 @@ export function processApprovalDecision(params: CreateApprovalParams): {
     orgBudgetLimitCents,
     requesterId,
     approver,
+  });
+
+  // If approved, policy MUST pass completely
+  if (decision === 'approved' && !policyResult.passed) {
+    throw new Error(
+      `Cannot approve quote due to policy violations: ${policyResult.violations.join('; ')}`
+    );
+  }
+
+  const digitalSignature = computeApprovalSignature({
+    quoteId: quote.id,
+    quoteVersion: quote.version,
+    quoteChecksum: quote.checksumHash,
+    totalCents: quote.totalCents,
+    currency: quote.currency,
+    supplierId: quote.supplierId,
+    approverId: approver.userId,
+    decision,
+  });
+
+  const approval: Approval = {
+    id: randomUUID(),
+    quoteId: quote.id,
+    businessId: quote.businessId,
+    approverId: approver.userId,
+    approverName: approver.userName,
+    approverRole: approver.role,
+    quoteVersion: quote.version,
+    approvedTotalCents: quote.totalCents,
+    approvedCurrency: quote.currency,
+    approvedSupplierId: quote.supplierId,
+    decision,
+    reason,
+    digitalSignature,
+    createdAt: new Date().toISOString(),
+  };
+
+  return { approval, policyResult };
+}
+
+/**
+ * Authoritatively executes the approval decision asynchronously.
+ * Enforces authoritative policy guardrails via evaluatePolicyAsync and issues a sealed record.
+ */
+export async function processApprovalDecisionAsync(params: CreateApprovalParams): Promise<{
+  approval: Approval;
+  policyResult: ReturnType<typeof evaluatePolicy>;
+}> {
+  const { quote, approver, decision, reason, budgetLimitCents, orgBudgetLimitCents, requesterId, supplier } = params;
+
+  // Run authoritative policy checks asynchronously
+  const policyResult = await evaluatePolicyAsync({
+    quote,
+    budgetLimitCents,
+    orgBudgetLimitCents,
+    requesterId,
+    approver,
+    supplier,
   });
 
   // If approved, policy MUST pass completely

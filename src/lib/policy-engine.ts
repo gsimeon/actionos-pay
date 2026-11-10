@@ -2,10 +2,15 @@
 // Enforces corporate guardrails: approved suppliers, budget ceilings,
 // role-based authority, self-approval bans, and quote freshness.
 
-import { getSupplierById, getBusinessBudgetLimitCents } from './catalog';
+import {
+  getSupplierById,
+  getBusinessBudgetLimitCents,
+  resolveAuthoritativeSupplierAsync,
+  resolveAuthoritativeBusinessBudgetLimitAsync,
+} from './catalog';
 import { formatCurrency } from './currency';
 import { verifyQuoteIntegrity } from './quote-engine';
-import { PolicyCheckItem, PolicyEvaluationResult, Quote, TeamMember } from './types';
+import { PolicyCheckItem, PolicyEvaluationResult, Quote, Supplier, TeamMember } from './types';
 
 export interface EvaluatePolicyParams {
   quote: Quote;
@@ -13,6 +18,7 @@ export interface EvaluatePolicyParams {
   orgBudgetLimitCents?: number;
   requesterId?: string;
   approver?: TeamMember;
+  supplier?: Supplier;
 }
 
 /**
@@ -24,8 +30,7 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
   const violations: string[] = [];
 
   // 1. Supplier Approval & Tenant Ownership Check
-  const supplier = getSupplierById(quote.supplierId);
-  const supplierExists = Boolean(supplier);
+  const supplier = params.supplier || getSupplierById(quote.supplierId);
   const supplierApproved = Boolean(supplier && supplier.isApproved);
   const supplierMatchesTenant = Boolean(
     supplier && (!supplier.businessId || supplier.businessId === quote.businessId)
@@ -188,4 +193,32 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
     checks,
     violations,
   };
+}
+
+/**
+ * Authoritatively evaluates policy asynchronously.
+ * Resolves the supplier and organization budget limit authoritatively from the database in Supabase mode
+ * (or from registered fixtures in local demo mode), ensuring complete consistency with quote generation.
+ */
+export async function evaluatePolicyAsync(
+  params: EvaluatePolicyParams
+): Promise<PolicyEvaluationResult> {
+  const { quote, orgBudgetLimitCents } = params;
+
+  // Resolve supplier authoritatively from database in Supabase mode or fixtures in demo mode
+  const resolvedSupplier =
+    params.supplier ||
+    (await resolveAuthoritativeSupplierAsync(quote.businessId, quote.supplierId));
+
+  // Resolve authoritative organization spending ceiling
+  const resolvedOrgLimit =
+    typeof orgBudgetLimitCents === 'number' && orgBudgetLimitCents > 0
+      ? orgBudgetLimitCents
+      : await resolveAuthoritativeBusinessBudgetLimitAsync(quote.businessId);
+
+  return evaluatePolicy({
+    ...params,
+    orgBudgetLimitCents: resolvedOrgLimit,
+    supplier: resolvedSupplier,
+  });
 }

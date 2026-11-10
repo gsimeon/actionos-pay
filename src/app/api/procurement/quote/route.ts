@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { evaluatePolicy } from '@/lib/policy-engine';
+import { evaluatePolicyAsync } from '@/lib/policy-engine';
 import { calculateQuoteAsync, QuoteInputItem } from '@/lib/quote-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { authorizeRequest } from '@/lib/auth-guard';
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
       items,
     });
 
-    const policyResult = evaluatePolicy({
+    const policyResult = await evaluatePolicyAsync({
       quote,
       budgetLimitCents: procurementRequest.budgetLimitCents,
       orgBudgetLimitCents,

@@ -160,7 +160,7 @@ export class LedgerEngine {
   static async getRequestAsync(id: string): Promise<ProcurementRequest | undefined> {
     if (isSupabaseConfigured()) {
       const dbReq = await fetchRequestFromSupabase(id);
-      if (dbReq) return dbReq;
+      return dbReq || undefined;
     }
     return getStore().requests.get(id);
   }
@@ -341,7 +341,7 @@ export class LedgerEngine {
   static async getQuoteAsync(id: string): Promise<Quote | undefined> {
     if (isSupabaseConfigured()) {
       const dbQuote = await fetchQuoteFromSupabase(id);
-      if (dbQuote) return dbQuote;
+      return dbQuote || undefined;
     }
     return getStore().quotes.get(id);
   }
@@ -473,7 +473,7 @@ export class LedgerEngine {
   static async getApprovalForQuoteAsync(quoteId: string): Promise<Approval | undefined> {
     if (isSupabaseConfigured()) {
       const dbApproval = await fetchApprovalFromSupabase(quoteId);
-      if (dbApproval) return dbApproval;
+      return dbApproval || undefined;
     }
     const list = Array.from(getStore().approvals.values()).filter((a) => a.quoteId === quoteId);
     return list[list.length - 1];
@@ -558,7 +558,7 @@ export class LedgerEngine {
   static async getPaymentByOrderIdAsync(orderId: string): Promise<PaymentAttempt | undefined> {
     if (isSupabaseConfigured()) {
       const dbPayment = await fetchPaymentByOrderIdFromSupabase(orderId);
-      if (dbPayment) return dbPayment;
+      return dbPayment || undefined;
     }
     return Array.from(getStore().payments.values()).find((p) => p.providerOrderId === orderId);
   }
@@ -570,7 +570,7 @@ export class LedgerEngine {
   static async getPaymentForQuoteAsync(quoteId: string): Promise<PaymentAttempt | undefined> {
     if (isSupabaseConfigured()) {
       const dbPayment = await fetchPaymentForQuoteFromSupabase(quoteId);
-      if (dbPayment) return dbPayment;
+      return dbPayment || undefined;
     }
     const list = Array.from(getStore().payments.values()).filter((p) => p.quoteId === quoteId);
     return list[list.length - 1];
@@ -1381,7 +1381,7 @@ export class LedgerEngine {
   static async getWebhookEventAsync(eventId: string): Promise<WebhookEventRecord | undefined> {
     if (isSupabaseConfigured()) {
       const dbWebhook = await fetchWebhookFromSupabase(eventId);
-      if (dbWebhook) return dbWebhook;
+      return dbWebhook || undefined;
     }
     return getStore().webhooks.get(eventId);
   }
@@ -1406,9 +1406,14 @@ export class LedgerEngine {
 
   // Audit Query
   static async getAuditEventsAsync(businessId?: string, entityId?: string): Promise<AuditEvent[]> {
-    if (isSupabaseConfigured() && businessId) {
+    if (isSupabaseConfigured()) {
+      if (!businessId) return [];
       const dbEvents = await fetchAuditEventsFromSupabase(businessId);
-      if (dbEvents && dbEvents.length > 0) return dbEvents;
+      let list = dbEvents || [];
+      if (entityId) {
+        list = list.filter((e) => e.entityId === entityId);
+      }
+      return list;
     }
     return this.getAuditEvents(businessId, entityId);
   }

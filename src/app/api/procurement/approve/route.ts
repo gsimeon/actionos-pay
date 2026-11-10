@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { processApprovalDecision } from '@/lib/approval-engine';
+import { processApprovalDecisionAsync } from '@/lib/approval-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { verifyQuoteIntegrity } from '@/lib/quote-engine';
 import { authorizeRequest } from '@/lib/auth-guard';
@@ -23,18 +23,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fetch authoritative quote first to verify tenant scope
-    const quote = await LedgerEngine.getQuoteAsync(quoteId);
-    if (!quote) {
-      return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
-    }
-
-    // Authorize caller against quote's business organization (requiring approver or admin role).
-    // The approver identity is derived strictly and immutably from the verified session (auth.member).
-    // Client-supplied approverUserId is never trusted as an authority; if supplied, it is validated for exact match.
+    // 1. Authenticate caller session & role first (enforces Bearer token in Supabase mode before DB probing)
     const auth = await authorizeRequest(
       req,
-      quote.businessId,
+      undefined,
       ['approver', 'admin'],
       approverUserId,
       { requireExplicitUser: true }
@@ -43,6 +35,22 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
     const approver = auth.member;
+
+    // 2. Fetch authoritative quote from database/ledger
+    const quote = await LedgerEngine.getQuoteAsync(quoteId);
+    if (!quote) {
+      return NextResponse.json({ error: `Quote "${quoteId}" not found.` }, { status: 404 });
+    }
+
+    // 3. Strict tenant boundary: Approver must belong to quote's organization
+    if (approver.businessId !== quote.businessId) {
+      return NextResponse.json(
+        {
+          error: `Approver "${approver.userName}" does not belong to business "${quote.businessId}". Cross-tenant operations are strictly prohibited.`,
+        },
+        { status: 403 }
+      );
+    }
 
     // Defense-in-depth: Re-verify that any client-supplied ID cannot diverge from the verified session member
     if (approverUserId && approverUserId !== approver.userId) {
@@ -82,7 +90,7 @@ export async function POST(req: Request) {
     const budgetLimitCents = parentRequest ? parentRequest.budgetLimitCents : orgBudgetLimitCents;
     const requesterId = parentRequest ? parentRequest.requesterId : undefined;
 
-    const { approval, policyResult } = processApprovalDecision({
+    const { approval, policyResult } = await processApprovalDecisionAsync({
       quote,
       approver,
       decision,

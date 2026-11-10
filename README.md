@@ -40,7 +40,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 
 | Tier | Suite | Scope & Verification |
 | :--- | :--- | :--- |
-| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 212+ automated tests across 16 test files verifying state machines, quote seals, SoD rules, multi-tenant budget ceilings & cross-tenant supplier isolation, database-backed catalogue resolution, production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API & auth error sanitization with correlation IDs, and AI planner source attribution. |
+| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 219+ automated tests across 17 test files verifying state machines, quote seals, SoD rules, multi-tenant budget ceilings & cross-tenant supplier isolation, database-backed catalogue resolution, authoritative Supabase persistence (no in-memory fallback), production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API & auth error sanitization with correlation IDs, and AI planner source attribution. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
 | **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | Validates the live PayPal Sandbox payment lifecycle: order creation, HATEOAS buyer approval link generation, pre-capture status (`APPROVED`) & financial integrity verification, server-side capture execution (`--capture <orderId>`), and authoritative ledger persistence. (Webhook event ingestion, signature verification, and atomic reconciliation are verified separately in Tier 1 automated contract tests.) |
 
@@ -99,7 +99,7 @@ No database credentials or PayPal credentials needed. Runs with an in-memory led
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (212+ tests passing across 16 suites)
+# 2. Run automated test suites (219+ tests passing across 17 suites)
 npm test
 
 # 3. Start local development server
@@ -162,7 +162,7 @@ npm run test:db:concurrency
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 212+ tests in 16 test suites on Node.js 22.x.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 219+ tests in 17 test suites on Node.js 22.x.
 3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` through `00009`, and executes:
    - `tests/db/test-migrations-and-rpcs.sql`: 29 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), atomic reservation, lease contention, failed capture state handling, and rollback behaviors.
    - `tests/db/test-role-permissions.sql`: Dynamic PostgreSQL role switching (`SET ROLE`) verifying privilege boundaries across `anon`, `authenticated` (matching/mismatched `auth.uid()`), and `service_role`.
