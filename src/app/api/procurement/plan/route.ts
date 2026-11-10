@@ -4,6 +4,7 @@ import { DEMO_BUSINESS } from '@/lib/catalog';
 import { LedgerEngine } from '@/lib/ledger';
 import { ProcurementRequest } from '@/lib/types';
 import { authorizeRequest } from '@/lib/auth-guard';
+import { checkRateLimit } from '@/lib/rate-limiter';
 import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
@@ -40,6 +41,25 @@ export async function POST(req: Request) {
     }
     const requester = auth.member;
     const businessId = requester.businessId;
+
+    // Rate Limiting Gate: Throttles repeated AI planning requests to prevent endpoint abuse (max 10 / min per user)
+    const rateLimit = checkRateLimit(`plan-rate-limit:${requester.userId}`, 10, 60);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: `Rate limit exceeded: maximum ${rateLimit.limit} planning requests per minute per user. Please retry in ${rateLimit.retryAfter} seconds.`,
+        },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.retryAfter),
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': String(rateLimit.remaining),
+            'X-RateLimit-Reset': String(rateLimit.resetSeconds),
+          },
+        }
+      );
+    }
 
     const plan = await parseProcurementIntent(
       prompt.trim(),

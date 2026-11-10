@@ -169,12 +169,12 @@ Every pull request and push to `main` executes a GitHub Actions pipeline (`.gith
 
 ---
 
-## Scheduled Webhook Recovery Automation
+## Webhook Recovery Architecture & Operational Automation
 
-Abandoned worker claims (>60s) and retryable failed webhook events are processed automatically via `.github/workflows/scheduled-recovery.yml` every 15 minutes.
-When `WEBHOOK_RECOVERY_URL` and `CRON_SECRET` are configured:
-- Workflow executes a preflight configuration verification, failing if secrets are missing.
-- Dispatches `POST /api/paypal/webhook/recover` with `{"strict": true}`.
+ActionOS Pay implements a durable recovery worker architecture for abandoned worker claims (>60s) and retryable failed webhook events via `/api/paypal/webhook/recover`.
+- In-process execution and dead-letter queue semantics are fully verified in the core CI test suite.
+- Operational automation is provided in `.github/workflows/scheduled-recovery.yml` (configured with `workflow_dispatch` and ready for cron activation once `WEBHOOK_RECOVERY_URL` and `CRON_SECRET` repository secrets are configured for a deployed instance).
+- When configured, dispatches `POST /api/paypal/webhook/recover` with `{"strict": true}`.
 - Parses JSON metrics: fails the job if `failedCount > 0`, and alerts if `deadLetteredCount > 0`.
 
 ---

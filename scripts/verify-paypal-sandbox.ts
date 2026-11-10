@@ -25,6 +25,7 @@ import {
   capturePayPalOrder,
   getPayPalOrderDetails,
   verifyOrderFinancialIntegrity,
+  verifyCaptureFinancialIntegrity,
 } from '../src/lib/paypal-service';
 import { computeApprovalSignature } from '../src/lib/approval-engine';
 import { computeQuoteChecksum } from '../src/lib/quote-engine';
@@ -160,7 +161,17 @@ async function runVerification() {
     if (liveStatus === 'COMPLETED') {
       console.log(`\n[5/6] Order "${specifiedOrderId}" is already COMPLETED in PayPal. Reconciling authoritative ledger...`);
       const existingCapture = integrity.captures?.[0];
-      const captureId = existingCapture?.id || paymentAttempt.providerCaptureId || 'VERIFIED_COMPLETED';
+      const captureVerification = verifyCaptureFinancialIntegrity(existingCapture, paymentAttempt);
+
+      if (!captureVerification.valid) {
+        console.error('\n❌ Security Capture Verification Violation: Completed order lacks verified capture record.');
+        console.error(`  Reason: ${captureVerification.error}`);
+        console.error(`  Order ID: ${specifiedOrderId}`);
+        console.error('  ActionOS Pay strictly prohibits manufacturing capture evidence or accepting incomplete capture objects.');
+        process.exit(1);
+      }
+
+      const captureId = captureVerification.captureId!;
 
       const updatedAttempt: PaymentAttempt = {
         ...paymentAttempt,

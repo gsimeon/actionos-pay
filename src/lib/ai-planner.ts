@@ -18,6 +18,22 @@ export const PlanItemSchema = z.object({
   suggestedSupplierName: z.string().optional(),
 });
 
+export const ALLOWED_GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+] as const;
+export type AllowedGeminiModel = (typeof ALLOWED_GEMINI_MODELS)[number];
+
+export function resolveGeminiModel(envModel?: string): AllowedGeminiModel {
+  if (envModel && (ALLOWED_GEMINI_MODELS as readonly string[]).includes(envModel.trim())) {
+    return envModel.trim() as AllowedGeminiModel;
+  }
+  return 'gemini-2.5-flash';
+}
+
 export const StructuredPlanSchema = z.object({
   summary: z.string().min(1),
   justification: z.string().optional(),
@@ -30,6 +46,8 @@ export const StructuredPlanSchema = z.object({
   confidenceScore: z.number().min(0).max(1),
   plannerSource: z.enum(['gemini', 'deterministic']).optional(),
   plannerModel: z.string().optional(),
+  plannerStatus: z.enum(['gemini_success', 'deterministic_fallback']).optional(),
+  fallbackReason: z.string().optional(),
 });
 
 /**
@@ -201,6 +219,27 @@ function isPlaceholder(val?: string | null): boolean {
   );
 }
 
+function categorizeGeminiError(err: unknown, httpStatus?: number): string {
+  if (httpStatus) {
+    return `GEMINI_HTTP_${httpStatus}`;
+  }
+  if (err instanceof Error) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return 'GEMINI_NETWORK_TIMEOUT';
+    }
+    if (err.message.includes('fetch failed') || err.message.includes('ENOTFOUND')) {
+      return 'GEMINI_NETWORK_UNREACHABLE';
+    }
+    if (err instanceof SyntaxError) {
+      return 'GEMINI_JSON_SYNTAX_ERROR';
+    }
+    if (err.name === 'ZodError') {
+      return 'GEMINI_SCHEMA_VALIDATION_ERROR';
+    }
+  }
+  return 'GEMINI_UNEXPECTED_ERROR';
+}
+
 /**
  * Parses natural language purchase intent into a structured plan.
  */
@@ -209,8 +248,10 @@ export async function parseProcurementIntent(
   businessBudgetLimitCents = DEMO_BUSINESS.budgetLimitCents
 ): Promise<StructuredPlan> {
   const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY;
+  let fallbackReason = 'NO_API_KEY_CONFIGURED';
 
   if (apiKey && !isPlaceholder(apiKey)) {
+    let httpStatus: number | undefined;
     try {
       const catalogueContext = DEMO_PRODUCTS.map(
         (p) => `- SKU: ${p.sku}, Name: "${p.name}", Category: ${p.category}, Unit Price: $${(p.unitPriceCents / 100).toFixed(2)}, Supplier ID: ${p.supplierId}`
@@ -250,7 +291,7 @@ Return JSON strictly matching this schema:
   "confidenceScore": number between 0.0 and 1.0
 }`;
 
-      const model = process.env.AI_MODEL || 'gemini-2.5-flash';
+      const model = resolveGeminiModel(process.env.AI_MODEL);
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: 'POST',
         headers: {
@@ -267,6 +308,8 @@ Return JSON strictly matching this schema:
         }),
       });
 
+      httpStatus = res.status;
+
       if (res.ok) {
         const data = await res.json();
         const rawJsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -277,11 +320,18 @@ Return JSON strictly matching this schema:
             ...validated,
             plannerSource: 'gemini',
             plannerModel: model,
+            plannerStatus: 'gemini_success',
           };
+        } else {
+          fallbackReason = 'GEMINI_EMPTY_RESPONSE';
         }
+      } else {
+        fallbackReason = categorizeGeminiError(null, res.status);
       }
-    } catch (err) {
-      console.warn('Gemini API call failed, using deterministic offline intent parser:', err);
+    } catch (err: unknown) {
+      fallbackReason = categorizeGeminiError(err, httpStatus);
+      const errorCategory = fallbackReason;
+      console.warn(`[ActionOS AI Planner] Gemini execution failed (${errorCategory}). Using deterministic catalogue fallback.`);
     }
   }
 
@@ -291,5 +341,7 @@ Return JSON strictly matching this schema:
     ...offlinePlan,
     plannerSource: 'deterministic',
     plannerModel: 'deterministic-catalogue-parser',
+    plannerStatus: 'deterministic_fallback',
+    fallbackReason,
   };
 }

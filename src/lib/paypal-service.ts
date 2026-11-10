@@ -300,13 +300,68 @@ export interface OrderIntegrityVerification {
   }>;
 }
 
+export interface CaptureIntegrityVerification {
+  valid: boolean;
+  error?: string;
+  captureId?: string;
+}
+
+/**
+ * Validates that an existing capture record in PayPal Orders v2 adheres strictly to financial invariants:
+ * 1. An actual capture record must exist.
+ * 2. Capture ID must be non-empty.
+ * 3. Capture status must be exactly 'COMPLETED'.
+ * 4. Capture amount value and currency must strictly match the authoritative paymentAttempt terms.
+ */
+export function verifyCaptureFinancialIntegrity(
+  capture:
+    | {
+        id?: string;
+        status?: string;
+        amount?: { currency_code?: string; value?: string };
+      }
+    | undefined,
+  paymentAttempt: PaymentAttempt
+): CaptureIntegrityVerification {
+  if (!capture) {
+    return { valid: false, error: 'Order does not contain an existing capture record in payments.captures.' };
+  }
+  const captureId = capture.id?.trim();
+  if (!captureId) {
+    return { valid: false, error: 'Capture record is missing a valid capture ID.' };
+  }
+  if (capture.status !== 'COMPLETED') {
+    return {
+      valid: false,
+      error: `Capture status is "${capture.status}", expected "COMPLETED" for verified payment settlement.`,
+    };
+  }
+  const expectedValue = (paymentAttempt.amountCents / 100).toFixed(2);
+  if (!capture.amount || !capture.amount.currency_code || !capture.amount.value) {
+    return { valid: false, error: 'Capture record is missing required amount or currency_code.' };
+  }
+  if (capture.amount.currency_code !== paymentAttempt.currency) {
+    return {
+      valid: false,
+      error: `Capture currency mismatch: expected ${paymentAttempt.currency}, received ${capture.amount.currency_code}.`,
+    };
+  }
+  if (capture.amount.value !== expectedValue) {
+    return {
+      valid: false,
+      error: `Capture amount mismatch: expected ${expectedValue} ${paymentAttempt.currency}, received ${capture.amount.value} ${capture.amount.currency_code}.`,
+    };
+  }
+  return { valid: true, captureId };
+}
+
 /**
  * Validates the financial and identity integrity of a live PayPal order against an authoritative ledger attempt.
  * Enforces fail-closed validation:
- * 1. Must contain valid purchase_units array with at least one item.
+ * 1. Must contain exactly one purchase unit (ActionOS Pay orders strictly specify exactly one purchase unit).
  * 2. Purchase unit must contain explicit amount value and currency code (rejects missing amounts fail-closed).
  * 3. Amount and currency must exactly match paymentAttempt amount (formatted as decimal string) and currency.
- * 4. If reference_id is present, it must match paymentAttempt.quoteId.
+ * 4. Reference ID is mandatory, non-empty, and must match paymentAttempt.quoteId.
  */
 export function verifyOrderFinancialIntegrity(
   liveOrder: Record<string, unknown>,
@@ -315,6 +370,13 @@ export function verifyOrderFinancialIntegrity(
   const purchaseUnits = liveOrder.purchase_units as Array<Record<string, unknown>> | undefined;
   if (!purchaseUnits || !Array.isArray(purchaseUnits) || purchaseUnits.length === 0) {
     return { valid: false, error: 'Order is missing required purchase_units array.' };
+  }
+
+  if (purchaseUnits.length !== 1) {
+    return {
+      valid: false,
+      error: `Invalid order structure: expected exactly one purchase unit, received ${purchaseUnits.length}.`,
+    };
   }
 
   const primaryUnit = purchaseUnits[0];
@@ -338,11 +400,11 @@ export function verifyOrderFinancialIntegrity(
     };
   }
 
-  const referenceId = primaryUnit.reference_id as string | undefined;
-  if (referenceId && referenceId !== paymentAttempt.quoteId) {
+  const referenceId = (primaryUnit.reference_id as string | undefined)?.trim();
+  if (!referenceId || referenceId !== paymentAttempt.quoteId) {
     return {
       valid: false,
-      error: `Order reference_id mismatch: expected quote ${paymentAttempt.quoteId}, received ${referenceId}.`,
+      error: `Missing or mismatched PayPal quote reference (reference_id mismatch): expected quote ${paymentAttempt.quoteId}, received ${referenceId || 'none'}.`,
     };
   }
 
@@ -445,20 +507,38 @@ export async function capturePayPalOrder(params: {
 
       const captureData = await res.json();
       const captureObj = captureData.purchase_units?.[0]?.payments?.captures?.[0];
-      const captureId = captureObj?.id || `CAP-${randomUUID().slice(0, 8)}`;
-      const isCompleted = captureObj?.status === 'COMPLETED';
 
+      // Rigorous Financial Capture Verification: Never manufacture capture IDs or accept invalid captures
+      const captureVerification = verifyCaptureFinancialIntegrity(captureObj, paymentAttempt);
+      if (!captureVerification.valid) {
+        const failedAttempt: PaymentAttempt = {
+          ...paymentAttempt,
+          status: 'failed',
+          errorMessage: `PayPal capture validation failed: ${captureVerification.error}`,
+          updatedAt: new Date().toISOString(),
+        };
+
+        return {
+          captureId: '',
+          status: 'FAILED',
+          paymentAttempt: failedAttempt,
+          isSimulated: false,
+          errorMessage: failedAttempt.errorMessage,
+        };
+      }
+
+      const captureId = captureVerification.captureId!;
       const updatedAttempt: PaymentAttempt = {
         ...paymentAttempt,
         providerCaptureId: captureId,
-        status: isCompleted ? 'captured' : 'reconciling',
+        status: 'captured',
         providerResponse: captureData,
         updatedAt: new Date().toISOString(),
       };
 
       return {
         captureId,
-        status: isCompleted ? 'COMPLETED' : 'PENDING',
+        status: 'COMPLETED',
         paymentAttempt: updatedAttempt,
         isSimulated: false,
       };

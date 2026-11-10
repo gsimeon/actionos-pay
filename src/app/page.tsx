@@ -809,12 +809,13 @@ export default function Home() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {structuredPlan.plannerSource === 'gemini' ? (
-                        <span className="rounded-full bg-violet-100 dark:bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-400/30">
-                          AI: Gemini ({structuredPlan.plannerModel || 'gemini-2.5-flash'})
+                        <span className="rounded-full bg-violet-100 dark:bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-400/30 flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          AI: Gemini ({structuredPlan.plannerModel || 'gemini-2.5-flash'}) · Live API
                         </span>
                       ) : (
                         <span className="rounded-full bg-blue-100 dark:bg-blue-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-400/30">
-                          Planner: Deterministic Catalogue Engine
+                          Planner: Deterministic Catalogue Engine ({structuredPlan.fallbackReason ? structuredPlan.fallbackReason.replace(/_/g, ' ') : 'Offline Mode'})
                         </span>
                       )}
                       <span className="rounded-full bg-emerald-100 dark:bg-emerald-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-400/20">

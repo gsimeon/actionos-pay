@@ -84,6 +84,8 @@ export interface StructuredPlan {
   confidenceScore: number; // 0.0 - 1.0
   plannerSource?: 'gemini' | 'deterministic';
   plannerModel?: string;
+  plannerStatus?: 'gemini_success' | 'deterministic_fallback';
+  fallbackReason?: string;
 }
 
 export interface QuoteItem {
