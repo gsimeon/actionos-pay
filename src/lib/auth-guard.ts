@@ -6,6 +6,7 @@
 // 4. Safe demo fallback strictly quarantined to unconfigured environments
 
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { DEMO_MEMBERS } from './catalog';
 import { fetchMembershipFromSupabase, getSupabase, isSupabaseConfigured } from './supabase';
 import { TeamMember, UserRole } from './types';
@@ -116,11 +117,17 @@ export async function authorizeRequest(
 
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData?.user) {
+      const correlationId = randomUUID();
+      console.error(
+        `[Correlation ID: ${correlationId}] Supabase authentication failure:`,
+        authErr?.message || 'Invalid or expired session token.'
+      );
       return {
         authorized: false,
         errorResponse: NextResponse.json(
           {
-            error: `Authentication failed: ${authErr?.message || 'Invalid or expired session token.'}`,
+            error: 'Authentication failed: Invalid or expired session token.',
+            correlationId,
           },
           { status: 401 }
         ),

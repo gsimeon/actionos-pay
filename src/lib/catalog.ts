@@ -12,6 +12,21 @@ export const DEMO_BUSINESS: Business = {
   createdAt: '2026-01-01T00:00:00Z',
 };
 
+// Second registered tenant for multi-tenant isolation testing & production tenant segregation
+export const SECOND_TEST_BUSINESS: Business = {
+  id: '00000000-0000-4000-8000-000000000002',
+  name: 'Sahara Cloud Logistics Ltd',
+  slug: 'sahara-cloud',
+  defaultCurrency: 'USD',
+  budgetLimitCents: 300000, // $3,000.00 (Distinct ceiling for multi-tenant isolation testing)
+  createdAt: '2026-01-01T00:00:00Z',
+};
+
+export const REGISTERED_BUSINESSES: Business[] = [
+  DEMO_BUSINESS,
+  SECOND_TEST_BUSINESS,
+];
+
 export const DEMO_MEMBERS: TeamMember[] = [
   {
     id: '00000000-0000-4000-8000-000000000011',
@@ -239,14 +254,19 @@ export function searchProducts(term: string): Product[] {
   );
 }
 
-export function getBusinessById(businessId?: string): Business {
-  if (businessId && businessId === DEMO_BUSINESS.id) {
-    return DEMO_BUSINESS;
-  }
-  return DEMO_BUSINESS;
+export function getBusinessById(businessId?: string): Business | undefined {
+  if (!businessId) return DEMO_BUSINESS;
+  return REGISTERED_BUSINESSES.find((b) => b.id === businessId);
 }
 
 export function getBusinessBudgetLimitCents(businessId?: string): number {
+  if (!businessId) {
+    return DEMO_BUSINESS.budgetLimitCents;
+  }
   const biz = getBusinessById(businessId);
+  if (!biz) {
+    // Fail-closed security invariant: Unrecognized tenant has 0 spending authority
+    return 0;
+  }
   return biz.budgetLimitCents;
 }

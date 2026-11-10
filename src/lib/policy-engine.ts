@@ -2,7 +2,7 @@
 // Enforces corporate guardrails: approved suppliers, budget ceilings,
 // role-based authority, self-approval bans, and quote freshness.
 
-import { getSupplierById } from './catalog';
+import { getSupplierById, getBusinessBudgetLimitCents } from './catalog';
 import { formatCurrency } from './currency';
 import { verifyQuoteIntegrity } from './quote-engine';
 import { PolicyCheckItem, PolicyEvaluationResult, Quote, TeamMember } from './types';
@@ -45,12 +45,19 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
   }
 
   // 2. Budget Limit & Organization Spending Ceiling Check
-  const effectiveCeiling =
-    typeof orgBudgetLimitCents === 'number' && orgBudgetLimitCents > 0
-      ? Math.min(budgetLimitCents, orgBudgetLimitCents)
-      : budgetLimitCents;
+  // Authoritative organization spending ceiling: Resolved explicitly from params or authoritatively from quote.businessId
+  const authoritativeOrgLimit =
+    typeof orgBudgetLimitCents === 'number'
+      ? orgBudgetLimitCents
+      : getBusinessBudgetLimitCents(quote.businessId);
 
-  const withinBudget = quote.totalCents <= effectiveCeiling;
+  // If the organization limit is zero or unrecognized, fail closed immediately
+  const effectiveCeiling =
+    authoritativeOrgLimit > 0
+      ? Math.min(budgetLimitCents, authoritativeOrgLimit)
+      : 0;
+
+  const withinBudget = quote.totalCents <= effectiveCeiling && effectiveCeiling > 0;
   if (withinBudget) {
     checks.push({
       code: 'BUDGET_COMPLIANCE',
@@ -60,9 +67,9 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
     });
   } else {
     const diff = quote.totalCents - effectiveCeiling;
-    const isOrgBreach = typeof orgBudgetLimitCents === 'number' && quote.totalCents > orgBudgetLimitCents;
+    const isOrgBreach = quote.totalCents > authoritativeOrgLimit;
     const errorMsg = isOrgBreach
-      ? `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the organization's authoritative budget ceiling (${formatCurrency(orgBudgetLimitCents!, quote.currency)}) by ${formatCurrency(quote.totalCents - orgBudgetLimitCents!, quote.currency)}.`
+      ? `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the organization's authoritative budget ceiling (${formatCurrency(authoritativeOrgLimit, quote.currency)}) by ${formatCurrency(quote.totalCents - authoritativeOrgLimit, quote.currency)}.`
       : `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the budget limit (${formatCurrency(budgetLimitCents, quote.currency)}) by ${formatCurrency(diff, quote.currency)}.`;
     checks.push({
       code: 'BUDGET_COMPLIANCE',
@@ -72,7 +79,7 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
       details: {
         quoteTotalCents: quote.totalCents,
         budgetLimitCents: effectiveCeiling,
-        orgBudgetLimitCents,
+        orgBudgetLimitCents: authoritativeOrgLimit,
         overageCents: diff,
       },
     });

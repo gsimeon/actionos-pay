@@ -40,7 +40,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 
 | Tier | Suite | Scope & Verification |
 | :--- | :--- | :--- |
-| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 190+ automated tests across 14 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API error sanitization with correlation IDs, and AI planner source attribution. |
+| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 198+ automated tests across 15 test files verifying state machines, quote seals, SoD rules, multi-tenant budget ceilings, tenant isolation, production capture lockdown, fail-closed security invariants, rate limiting, authoritative organization budget ceilings, API & auth error sanitization with correlation IDs, and AI planner source attribution. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
 | **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | Validates the live PayPal Sandbox payment lifecycle: order creation, HATEOAS buyer approval link generation, pre-capture status (`APPROVED`) & financial integrity verification, server-side capture execution (`--capture <orderId>`), and authoritative ledger persistence. (Webhook event ingestion, signature verification, and atomic reconciliation are verified separately in Tier 1 automated contract tests.) |
 
@@ -60,6 +60,8 @@ To ensure total clarity regarding where data lives across evaluation modes:
 
 ## Architecture & Financial Invariants
 
+- **Authoritative Tenant Spending Ceilings**: Spending limits are strictly governed by the organization's server-side record, never client input. In local demo mode, registered tenant fixtures (`Apex Innovations` at $10,000 and `Sahara Cloud` at $3,000) prove multi-tenant isolation, failing closed with 0 budget authority for unverified tenants; in production Supabase mode, ceilings are fetched dynamically from the `businesses` table with RLS.
+- **Process-Local Rate Limiting (Single-Instance)**: An in-memory sliding window rate limiter protects `/api/procurement/plan` (max 10 req/min per user) for single-instance hackathon evaluation. Distributed deployments specify backing by a shared PostgreSQL function or Redis cache.
 - **Minor-Unit Integer Precision**: All pricing and calculations use integer cents (`179900` = \$1,799.00) to eliminate floating-point drift.
 - **Client Amounts Untrusted**: Browsers never supply payment amounts. Prices are loaded authoritatively from the catalogue on the server.
 - **Atomic Order Reservation**: Stored procedure `reserve_payment_attempt_atomic` (Migration `00008`) reserves quotes before contacting PayPal, enforcing mutual exclusion against concurrent requests.
@@ -97,7 +99,7 @@ No database credentials or PayPal credentials needed. Runs with an in-memory led
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (190+ tests passing across 14 suites)
+# 2. Run automated test suites (198+ tests passing across 15 suites)
 npm test
 
 # 3. Start local development server
@@ -160,7 +162,7 @@ npm run test:db:concurrency
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 190+ tests in 14 test suites.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 198+ tests in 15 test suites.
 3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` through `00009`, and executes:
    - `tests/db/test-migrations-and-rpcs.sql`: 29 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), atomic reservation, lease contention, failed capture state handling, and rollback behaviors.
    - `tests/db/test-role-permissions.sql`: Dynamic PostgreSQL role switching (`SET ROLE`) verifying privilege boundaries across `anon`, `authenticated` (matching/mismatched `auth.uid()`), and `service_role`.
