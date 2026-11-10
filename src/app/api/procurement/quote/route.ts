@@ -3,6 +3,8 @@ import { evaluatePolicy } from '@/lib/policy-engine';
 import { calculateQuote, QuoteInputItem } from '@/lib/quote-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { authorizeRequest } from '@/lib/auth-guard';
+import { getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -38,6 +40,8 @@ export async function POST(req: Request) {
       return auth.errorResponse!;
     }
 
+    const orgBudgetLimitCents = getBusinessBudgetLimitCents(procurementRequest.businessId);
+
     const quote = calculateQuote({
       requestId,
       businessId: procurementRequest.businessId,
@@ -48,6 +52,7 @@ export async function POST(req: Request) {
     const policyResult = evaluatePolicy({
       quote,
       budgetLimitCents: procurementRequest.budgetLimitCents,
+      orgBudgetLimitCents,
       requesterId: procurementRequest.requesterId,
     });
 
@@ -74,8 +79,25 @@ export async function POST(req: Request) {
       policyResult,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/procurement/quote:', error);
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/procurement/quote:`, error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    if (
+      message.includes('items array') ||
+      message.includes('not found') ||
+      message.includes('Missing required') ||
+      message.includes('Invalid')
+    ) {
+      return NextResponse.json({ error: message, correlationId }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      {
+        error: 'An unexpected internal error occurred while calculating quote or verifying guardrails.',
+        correlationId,
+      },
+      { status: 500 }
+    );
   }
 }

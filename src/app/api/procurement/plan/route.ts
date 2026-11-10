@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { parseProcurementIntent } from '@/lib/ai-planner';
-import { DEMO_BUSINESS } from '@/lib/catalog';
+import { DEMO_BUSINESS, getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { formatCurrency } from '@/lib/currency';
 import { LedgerEngine } from '@/lib/ledger';
 import { ProcurementRequest } from '@/lib/types';
 import { authorizeRequest } from '@/lib/auth-guard';
@@ -61,9 +62,37 @@ export async function POST(req: Request) {
       );
     }
 
+    // Organization-level Authoritative Budget Ceiling Validation
+    const orgCeilingCents = getBusinessBudgetLimitCents(businessId);
+
+    let effectiveBudgetLimitCents: number;
+    if (budgetLimitCents !== undefined && budgetLimitCents !== null) {
+      if (
+        typeof budgetLimitCents !== 'number' ||
+        !Number.isInteger(budgetLimitCents) ||
+        budgetLimitCents <= 0
+      ) {
+        return NextResponse.json(
+          { error: 'Budget limit must be a positive integer in cents.' },
+          { status: 400 }
+        );
+      }
+      if (budgetLimitCents > orgCeilingCents) {
+        return NextResponse.json(
+          {
+            error: `Requested budget (${formatCurrency(budgetLimitCents)}) exceeds the authoritative organization budget ceiling of ${formatCurrency(orgCeilingCents)}. Requesters cannot increase spending authority.`,
+          },
+          { status: 400 }
+        );
+      }
+      effectiveBudgetLimitCents = budgetLimitCents;
+    } else {
+      effectiveBudgetLimitCents = orgCeilingCents;
+    }
+
     const plan = await parseProcurementIntent(
       prompt.trim(),
-      budgetLimitCents || DEMO_BUSINESS.budgetLimitCents
+      effectiveBudgetLimitCents
     );
 
     const requestId = randomUUID();
@@ -75,7 +104,7 @@ export async function POST(req: Request) {
       rawPrompt: prompt.trim(),
       structuredPlan: plan,
       status: plan.clarificationNeeded ? 'clarification_needed' : 'draft',
-      budgetLimitCents: plan.budgetLimitCents,
+      budgetLimitCents: effectiveBudgetLimitCents,
       currency: plan.currency,
       clarificationQuestions: plan.clarificationQuestions,
       createdAt: new Date().toISOString(),
@@ -95,7 +124,7 @@ export async function POST(req: Request) {
       payload: {
         rawPrompt: prompt,
         extractedSummary: plan.summary,
-        budgetLimitCents: plan.budgetLimitCents,
+        budgetLimitCents: effectiveBudgetLimitCents,
         confidenceScore: plan.confidenceScore,
         clarificationNeeded: plan.clarificationNeeded,
       },
@@ -107,9 +136,13 @@ export async function POST(req: Request) {
       plan,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/procurement/plan:', error);
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/procurement/plan:`, error);
     return NextResponse.json(
-      { error: 'An unexpected error occurred while generating the procurement plan.' },
+      {
+        error: 'An unexpected error occurred while generating the procurement plan.',
+        correlationId,
+      },
       { status: 500 }
     );
   }

@@ -3,6 +3,8 @@ import { processApprovalDecision } from '@/lib/approval-engine';
 import { LedgerEngine } from '@/lib/ledger';
 import { verifyQuoteIntegrity } from '@/lib/quote-engine';
 import { authorizeRequest } from '@/lib/auth-guard';
+import { getBusinessBudgetLimitCents } from '@/lib/catalog';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -76,7 +78,8 @@ export async function POST(req: Request) {
     }
 
     const parentRequest = await LedgerEngine.getRequestAsync(quote.requestId);
-    const budgetLimitCents = parentRequest ? parentRequest.budgetLimitCents : 1000000;
+    const orgBudgetLimitCents = getBusinessBudgetLimitCents(quote.businessId);
+    const budgetLimitCents = parentRequest ? parentRequest.budgetLimitCents : orgBudgetLimitCents;
     const requesterId = parentRequest ? parentRequest.requesterId : undefined;
 
     const { approval, policyResult } = processApprovalDecision({
@@ -85,6 +88,7 @@ export async function POST(req: Request) {
       decision,
       reason,
       budgetLimitCents,
+      orgBudgetLimitCents,
       requesterId,
     });
 
@@ -97,8 +101,30 @@ export async function POST(req: Request) {
       policyResult,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/procurement/approve:', error);
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/procurement/approve:`, error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 400 });
+
+    // Business policy and validation rejections return status 400 with actionable feedback
+    if (
+      message.includes('Cannot approve quote') ||
+      message.includes('Self-approval') ||
+      message.includes('exceeds approver') ||
+      message.includes('policy violations') ||
+      message.includes('exceeds the organization') ||
+      message.includes('Quote cryptographic') ||
+      message.includes('expired')
+    ) {
+      return NextResponse.json({ error: message, correlationId }, { status: 400 });
+    }
+
+    // Unexpected internal errors return sanitized 500 with correlationId
+    return NextResponse.json(
+      {
+        error: 'An unexpected internal error occurred while processing approval.',
+        correlationId,
+      },
+      { status: 500 }
+    );
   }
 }

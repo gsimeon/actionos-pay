@@ -96,8 +96,14 @@ export async function POST(req: Request) {
       payment: result.payment,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/paypal/webhook:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/paypal/webhook:`, error);
+    return NextResponse.json(
+      {
+        error: 'An unexpected internal error occurred while processing PayPal webhook.',
+        correlationId,
+      },
+      { status: 500 }
+    );
   }
 }

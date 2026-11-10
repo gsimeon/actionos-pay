@@ -759,7 +759,10 @@ export default function Home() {
               <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_200px]">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200">
+                    <label
+                      htmlFor="purchase-instructions-input"
+                      className="block text-xs font-semibold text-slate-800 dark:text-slate-200"
+                    >
                       Purchase Instructions (Natural English)
                     </label>
                     <span className="text-[11px] text-violet-600 dark:text-violet-400 font-medium">
@@ -767,6 +770,7 @@ export default function Home() {
                     </span>
                   </div>
                   <textarea
+                    id="purchase-instructions-input"
                     rows={3}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -780,18 +784,34 @@ export default function Home() {
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200">Authorized Cap</label>
-                    <span className="text-[11px] text-slate-500 font-medium">USD</span>
+                    <label
+                      htmlFor="requested-budget-input"
+                      className="block text-xs font-semibold text-slate-800 dark:text-slate-200"
+                    >
+                      Requested Budget ($)
+                    </label>
+                    <span
+                      className="text-[10px] text-emerald-700 dark:text-emerald-300 font-semibold bg-emerald-100/80 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-500/30"
+                      title="Authoritative Organization Budget Ceiling"
+                    >
+                      Org Cap: {formatCurrency(DEMO_BUSINESS.budgetLimitCents)}
+                    </span>
                   </div>
                   <div className="relative">
                     <span className="absolute left-3.5 top-2.5 text-slate-700 dark:text-slate-300 text-sm font-bold">$</span>
                     <input
+                      id="requested-budget-input"
                       type="number"
+                      max={10000}
+                      min={1}
                       value={budgetCap}
                       onChange={(e) => setBudgetCap(e.target.value)}
                       className="w-full rounded-2xl border-2 border-slate-300 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/90 pl-8 pr-3 py-2.5 text-sm font-semibold text-slate-900 dark:text-slate-100 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-violet-600 dark:focus:border-violet-400 focus:bg-white dark:focus:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition shadow-inner"
                     />
                   </div>
+                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                    Subject to hard org spending ceiling ({formatCurrency(DEMO_BUSINESS.budgetLimitCents)}). Requesters cannot increase budget authority.
+                  </p>
                   <button
                     onClick={handleGeneratePlan}
                     disabled={isPlanning || !prompt.trim()}
@@ -1111,39 +1131,48 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <input
-                        type="text"
-                        value={approvalNote}
-                        onChange={(e) => setApprovalNote(e.target.value)}
-                        placeholder="Optional approval note or justification (e.g. Q4 engineering team expansion approved)"
-                        className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApproval('rejected')}
-                          disabled={isApproving}
-                          className="rounded-xl border border-rose-300 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-800 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition disabled:opacity-50"
-                        >
-                          Reject
-                        </button>
-                        <button
-                          onClick={() => handleApproval('approved')}
-                          disabled={isApproving || Boolean(policyResult && !policyResult.passed)}
-                          className="rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-40 flex items-center gap-2 shadow-lg shadow-emerald-600/20"
-                        >
-                          {isApproving ? (
-                            <>
-                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              Sealing Approval...
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="h-4 w-4" />
-                              Approve Quote v{currentQuote.version}
-                            </>
-                          )}
-                        </button>
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="approval-note-input"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                      >
+                        Approval Note / Governance Justification
+                      </label>
+                      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                        <input
+                          id="approval-note-input"
+                          type="text"
+                          value={approvalNote}
+                          onChange={(e) => setApprovalNote(e.target.value)}
+                          placeholder="Optional approval note or justification (e.g. Q4 engineering team expansion approved)"
+                          className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleApproval('rejected')}
+                            disabled={isApproving}
+                            className="rounded-xl border border-rose-300 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-800 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            onClick={() => handleApproval('approved')}
+                            disabled={isApproving || Boolean(policyResult && !policyResult.passed)}
+                            className="rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-40 flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+                          >
+                            {isApproving ? (
+                              <>
+                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                Sealing Approval...
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="h-4 w-4" />
+                                Approve Quote v{currentQuote.version}
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

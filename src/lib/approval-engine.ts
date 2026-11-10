@@ -14,6 +14,7 @@ export interface CreateApprovalParams {
   decision: 'approved' | 'rejected';
   reason?: string;
   budgetLimitCents: number;
+  orgBudgetLimitCents?: number;
   requesterId?: string;
 }
 
@@ -199,12 +200,13 @@ export function processApprovalDecision(params: CreateApprovalParams): {
   approval: Approval;
   policyResult: ReturnType<typeof evaluatePolicy>;
 } {
-  const { quote, approver, decision, reason, budgetLimitCents, requesterId } = params;
+  const { quote, approver, decision, reason, budgetLimitCents, orgBudgetLimitCents, requesterId } = params;
 
   // Run policy checks
   const policyResult = evaluatePolicy({
     quote,
     budgetLimitCents,
+    orgBudgetLimitCents,
     requesterId,
     approver,
   });

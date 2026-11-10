@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { authorizeRequest } from '@/lib/auth-guard';
 import { LedgerEngine } from '@/lib/ledger';
 import { runWebhookRecoveryWorkerAsync } from '@/lib/webhook-processor';
+import { randomUUID } from 'crypto';
 
 /**
  * GET /api/paypal/webhook/recover
@@ -45,9 +46,15 @@ export async function GET(req: Request) {
       metrics,
     });
   } catch (error: unknown) {
-    console.error('Error in GET /api/paypal/webhook/recover:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in GET /api/paypal/webhook/recover:`, error);
+    return NextResponse.json(
+      {
+        error: 'An unexpected internal error occurred while retrieving webhook recovery metrics.',
+        correlationId,
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -101,8 +108,14 @@ export async function POST(req: Request) {
       { status: statusCode }
     );
   } catch (error: unknown) {
-    console.error('Error in POST /api/paypal/webhook/recover:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in POST /api/paypal/webhook/recover:`, error);
+    return NextResponse.json(
+      {
+        error: 'An unexpected internal error occurred while executing the webhook recovery worker.',
+        correlationId,
+      },
+      { status: 500 }
+    );
   }
 }

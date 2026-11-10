@@ -10,6 +10,7 @@ import { PolicyCheckItem, PolicyEvaluationResult, Quote, TeamMember } from './ty
 export interface EvaluatePolicyParams {
   quote: Quote;
   budgetLimitCents: number;
+  orgBudgetLimitCents?: number;
   requesterId?: string;
   approver?: TeamMember;
 }
@@ -18,7 +19,7 @@ export interface EvaluatePolicyParams {
  * Runs all governance checks against an active quote and optional approver context.
  */
 export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationResult {
-  const { quote, budgetLimitCents, requesterId, approver } = params;
+  const { quote, budgetLimitCents, orgBudgetLimitCents, requesterId, approver } = params;
   const checks: PolicyCheckItem[] = [];
   const violations: string[] = [];
 
@@ -43,18 +44,26 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
     violations.push(errorMsg);
   }
 
-  // 2. Budget Limit Check
-  const withinBudget = quote.totalCents <= budgetLimitCents;
+  // 2. Budget Limit & Organization Spending Ceiling Check
+  const effectiveCeiling =
+    typeof orgBudgetLimitCents === 'number' && orgBudgetLimitCents > 0
+      ? Math.min(budgetLimitCents, orgBudgetLimitCents)
+      : budgetLimitCents;
+
+  const withinBudget = quote.totalCents <= effectiveCeiling;
   if (withinBudget) {
     checks.push({
       code: 'BUDGET_COMPLIANCE',
       name: 'Budget Threshold Guardrail',
       passed: true,
-      message: `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) is within the approved budget limit of ${formatCurrency(budgetLimitCents, quote.currency)}.`,
+      message: `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) is within the approved budget limit of ${formatCurrency(effectiveCeiling, quote.currency)}.`,
     });
   } else {
-    const diff = quote.totalCents - budgetLimitCents;
-    const errorMsg = `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the budget limit (${formatCurrency(budgetLimitCents, quote.currency)}) by ${formatCurrency(diff, quote.currency)}.`;
+    const diff = quote.totalCents - effectiveCeiling;
+    const isOrgBreach = typeof orgBudgetLimitCents === 'number' && quote.totalCents > orgBudgetLimitCents;
+    const errorMsg = isOrgBreach
+      ? `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the organization's authoritative budget ceiling (${formatCurrency(orgBudgetLimitCents!, quote.currency)}) by ${formatCurrency(quote.totalCents - orgBudgetLimitCents!, quote.currency)}.`
+      : `Quote total (${formatCurrency(quote.totalCents, quote.currency)}) exceeds the budget limit (${formatCurrency(budgetLimitCents, quote.currency)}) by ${formatCurrency(diff, quote.currency)}.`;
     checks.push({
       code: 'BUDGET_COMPLIANCE',
       name: 'Budget Threshold Guardrail',
@@ -62,7 +71,8 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
       message: errorMsg,
       details: {
         quoteTotalCents: quote.totalCents,
-        budgetLimitCents,
+        budgetLimitCents: effectiveCeiling,
+        orgBudgetLimitCents,
         overageCents: diff,
       },
     });

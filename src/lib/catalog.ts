@@ -238,3 +238,15 @@ export function searchProducts(term: string): Product[] {
       p.category.toLowerCase().includes(lower)
   );
 }
+
+export function getBusinessById(businessId?: string): Business {
+  if (businessId && businessId === DEMO_BUSINESS.id) {
+    return DEMO_BUSINESS;
+  }
+  return DEMO_BUSINESS;
+}
+
+export function getBusinessBudgetLimitCents(businessId?: string): number {
+  const biz = getBusinessById(businessId);
+  return biz.budgetLimitCents;
+}
