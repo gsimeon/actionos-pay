@@ -40,7 +40,7 @@ To maintain rigorous engineering honesty, ActionOS Pay organizes its testing int
 
 | Tier | Suite | Scope & Verification |
 | :--- | :--- | :--- |
-| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 143+ automated tests across 12 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, fail-closed security invariants, and AI planner source attribution. |
+| **Tier 1: Automated Simulation** | Unit, Security & Adversarial Suites (`npm test`) | 174+ automated tests across 13 test files verifying state machines, quote seals, SoD rules, tenant isolation, production capture lockdown, fail-closed security invariants, rate limiting, and AI planner source attribution. |
 | **Tier 2: Live PayPal Sandbox API** | Live Sandbox Contract Suite (`npm run test:sandbox`) | Real PayPal Sandbox OAuth2 token acquisition, live Orders v2 API order creation, HATEOAS approval link extraction, and unapproved capture rejection (`ORDER_NOT_APPROVED`). |
 | **Tier 3: Interactive Sandbox Acceptance** | CLI Verification Runner (`npm run verify:sandbox`) | Validates the live PayPal Sandbox payment lifecycle: order creation, HATEOAS buyer approval link generation, pre-capture status (`APPROVED`) & financial integrity verification, server-side capture execution (`--capture <orderId>`), and authoritative ledger persistence. (Webhook event ingestion, signature verification, and atomic reconciliation are verified separately in Tier 1 automated contract tests.) |
 
@@ -97,7 +97,7 @@ No database credentials or PayPal credentials needed. Runs with an in-memory led
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suites (150+ tests passing)
+# 2. Run automated test suites (174+ tests passing across 13 suites)
 npm test
 
 # 3. Start local development server
@@ -160,7 +160,7 @@ npm run test:db:concurrency
 
 Every pull request and push to `main` executes a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing 4 discrete acceptance gates:
 1. **Static Analysis & Lint Gate**: ESLint and TypeScript strict type checking (`npm run lint`, `npm run typecheck`).
-2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 137 tests.
+2. **Financial Integrity & Adversarial Tests**: Vitest test execution across all 174+ tests in 13 test suites.
 3. **Database Migration & PostgreSQL Acceptance Gate**: Boots a live `postgres:15-alpine` container, sequentially applies migrations `00001` through `00009`, and executes:
    - `tests/db/test-migrations-and-rpcs.sql`: 29 live stored procedures, transactional constraints, session identity binding (`auth.uid()`), atomic reservation, lease contention, failed capture state handling, and rollback behaviors.
    - `tests/db/test-role-permissions.sql`: Dynamic PostgreSQL role switching (`SET ROLE`) verifying privilege boundaries across `anon`, `authenticated` (matching/mismatched `auth.uid()`), and `service_role`.

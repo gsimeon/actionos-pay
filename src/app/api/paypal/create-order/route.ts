@@ -4,6 +4,7 @@ import { LedgerEngine } from '@/lib/ledger';
 import { createPayPalOrder } from '@/lib/paypal-service';
 import { verifyQuoteIntegrity } from '@/lib/quote-engine';
 import { authorizeRequest } from '@/lib/auth-guard';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -166,8 +167,17 @@ export async function POST(req: Request) {
       isSimulated: result.isSimulated,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/paypal/create-order:', error);
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/paypal/create-order:`, error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: message.includes('Cannot create PayPal order') || message.includes('Integrity') || message.includes('Security')
+          ? message
+          : 'Failed to create PayPal order. Please verify your credentials and try again.',
+        correlationId,
+      },
+      { status: 502 }
+    );
   }
 }

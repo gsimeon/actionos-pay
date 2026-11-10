@@ -12,6 +12,9 @@ import {
 } from '@/lib/ai-planner';
 import { checkRateLimit, resetRateLimits } from '@/lib/rate-limiter';
 import { POST as planRoutePost } from '@/app/api/procurement/plan/route';
+import { POST as captureOrderRoute } from '@/app/api/paypal/capture-order/route';
+import { POST as createOrderRoute } from '@/app/api/paypal/create-order/route';
+import { LedgerEngine } from '@/lib/ledger';
 import { PaymentAttempt } from '@/lib/types';
 
 describe('Phase 16: Final Payment Integrity, Capture Verification & Submission Gate', () => {
@@ -260,6 +263,55 @@ describe('Phase 16: Final Payment Integrity, Capture Verification & Submission G
       expect(res.captureId).toBe('');
       expect(res.paymentAttempt.status).toBe('failed');
       expect(res.errorMessage).toContain('missing a valid capture ID');
+    });
+
+    it('rejects replay capture if payment attempt has missing or synthetic providerCaptureId', async () => {
+      const capturedAttemptWithoutId: PaymentAttempt = {
+        ...testPaymentAttempt,
+        status: 'captured',
+        providerCaptureId: undefined,
+      };
+
+      await expect(
+        capturePayPalOrder({
+          orderId: 'ORDER-PAYPAL-12345',
+          paymentAttempt: capturedAttemptWithoutId,
+        })
+      ).rejects.toThrow('Captured payment attempt lacks a verified provider capture ID');
+    });
+
+    it('returns HTTP 500 Financial Integrity Error if ALREADY_CAPTURED claim has no valid capture ID', async () => {
+      const businessId = '00000000-0000-4000-8000-000000000001';
+      const orderId = `ORD-CORRUPT-${randomUUID().slice(0, 8)}`;
+      const corruptedAttempt: PaymentAttempt = {
+        ...testPaymentAttempt,
+        id: randomUUID(),
+        businessId,
+        providerOrderId: orderId,
+        status: 'captured',
+        providerCaptureId: undefined, // Missing capture ID
+      };
+
+      await LedgerEngine.savePaymentAttemptAsync(corruptedAttempt);
+
+      const req = new Request('http://localhost:3000/api/paypal/capture-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-demo-user-id': '00000000-0000-4000-8000-000000000020', // Chidi (Approver)
+          'x-business-id': businessId,
+        },
+        body: JSON.stringify({
+          orderId,
+          callerUserId: '00000000-0000-4000-8000-000000000020',
+        }),
+      });
+
+      const res = await captureOrderRoute(req);
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.error).toContain('lacks verified provider capture ID');
+      expect(data.captureId).toBeUndefined();
     });
   });
 

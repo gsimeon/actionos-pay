@@ -465,8 +465,12 @@ export async function capturePayPalOrder(params: {
 
   // Check state machine: already captured replay
   if (paymentAttempt.status === 'captured') {
+    const captureId = paymentAttempt.providerCaptureId?.trim();
+    if (!captureId || captureId === 'ALREADY_CAPTURED') {
+      throw new Error('Financial Integrity Error: Captured payment attempt lacks a verified provider capture ID.');
+    }
     return {
-      captureId: paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
+      captureId,
       status: 'COMPLETED',
       paymentAttempt,
       isSimulated: Boolean(paymentAttempt.providerResponse?.is_simulated),

@@ -1,5 +1,14 @@
 // ActionOS Pay: Rate Limiter for AI Procurement Planning
 // Throttles repeated invocations against paid Gemini AI endpoints to protect budget and prevent abuse.
+//
+// Architectural Note:
+// 1. Single-Instance / Demo Protection:
+//    Uses an in-process sliding window map providing sub-millisecond local request throttling
+//    without adding external infrastructure latency or third-party service dependencies.
+// 2. Multi-Instance Distributed Production Scaling:
+//    In a multi-region or clustered deployment behind a load balancer, this interface adapts
+//    to a distributed store (e.g. Supabase PostgreSQL atomic counter function `increment_rate_limit(key, window)`
+//    or Upstash Redis token bucket) ensuring synchronized rate limits across all application nodes.
 
 interface RateLimitRecord {
   count: number;
@@ -70,3 +79,4 @@ export function checkRateLimit(
 export function resetRateLimits(): void {
   rateLimitStore.clear();
 }
+

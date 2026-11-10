@@ -206,11 +206,18 @@ async function runVerification() {
     const claim = await LedgerEngine.claimPaymentCaptureAsync(specifiedOrderId, 60);
 
     if (claim.status === 'ALREADY_CAPTURED') {
+      const existingCaptureId = (claim.providerCaptureId || paymentAttempt.providerCaptureId)?.trim();
+      if (!existingCaptureId || existingCaptureId === 'ALREADY_CAPTURED') {
+        console.error('\n❌ Security Capture Verification Violation: Payment marked already captured lacks verified capture ID.');
+        console.error('ActionOS Pay prohibits manufacturing capture evidence or accepting incomplete capture records.');
+        process.exit(1);
+      }
+
       console.log('\n========================================================================');
       console.log('ℹ️ ORDER WAS ALREADY CAPTURED PREVIOUSLY');
       console.log('========================================================================');
       console.log(`Order ID:          ${specifiedOrderId}`);
-      console.log(`Capture ID:        ${claim.providerCaptureId || paymentAttempt.providerCaptureId}`);
+      console.log(`Capture ID:        ${existingCaptureId}`);
       console.log(`Status:            COMPLETED (Replay)`);
       console.log('========================================================================\n');
       return;

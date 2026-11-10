@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { LedgerEngine } from '@/lib/ledger';
 import { capturePayPalOrder, getPayPalCredentials } from '@/lib/paypal-service';
 import { authorizeRequest } from '@/lib/auth-guard';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -56,9 +57,21 @@ export async function POST(req: Request) {
     const claim = await LedgerEngine.claimPaymentCaptureAsync(orderId, 60);
 
     if (claim.status === 'ALREADY_CAPTURED') {
+      const verifiedCaptureId = (claim.providerCaptureId || paymentAttempt.providerCaptureId)?.trim();
+      if (!verifiedCaptureId || verifiedCaptureId === 'ALREADY_CAPTURED') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Financial Integrity Error: Captured payment lacks verified provider capture ID.',
+            status: 'FAILED',
+          },
+          { status: 500 }
+        );
+      }
+
       return NextResponse.json({
         success: true,
-        captureId: claim.providerCaptureId || paymentAttempt.providerCaptureId || 'ALREADY_CAPTURED',
+        captureId: verifiedCaptureId,
         status: 'COMPLETED',
         paymentAttempt: claim.paymentAttempt || paymentAttempt,
         isSimulated: Boolean(claim.paymentAttempt?.providerResponse?.is_simulated || paymentAttempt.providerResponse?.is_simulated),
@@ -132,8 +145,17 @@ export async function POST(req: Request) {
       isSimulated: result.isSimulated,
     });
   } catch (error: unknown) {
-    console.error('Error in /api/paypal/capture-order:', error);
+    const correlationId = randomUUID();
+    console.error(`[Correlation ID: ${correlationId}] Error in /api/paypal/capture-order:`, error);
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: message.includes('Integrity') || message.includes('Security') || message.includes('not found')
+          ? message
+          : 'Payment capture failed due to an upstream gateway error. Please try again.',
+        correlationId,
+      },
+      { status: 502 }
+    );
   }
 }
