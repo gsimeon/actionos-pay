@@ -57,6 +57,16 @@ body {
   color: #ffffff;
 }
 
+input, textarea, select {
+  color: var(--text-primary);
+  background-color: var(--surface-card);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
 /* Enterprise Structured Cards with High-Contrast Hierarchy */
 .glass-panel {
   background: var(--surface-card);

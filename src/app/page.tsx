@@ -604,8 +604,8 @@ export default function Home() {
             onClick={() => setActiveTab('studio')}
             className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
               activeTab === 'studio'
-                ? 'border-violet-500 text-violet-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
             <Sparkles className="h-4 w-4" />
@@ -615,8 +615,8 @@ export default function Home() {
             onClick={() => setActiveTab('ledger')}
             className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
               activeTab === 'ledger'
-                ? 'border-violet-500 text-violet-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
             <Database className="h-4 w-4" />
@@ -626,8 +626,8 @@ export default function Home() {
             onClick={() => setActiveTab('catalogue')}
             className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
               activeTab === 'catalogue'
-                ? 'border-violet-500 text-violet-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
             <Layers className="h-4 w-4" />
@@ -637,11 +637,11 @@ export default function Home() {
             onClick={() => setActiveTab('security')}
             className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition ${
               activeTab === 'security'
-                ? 'border-violet-500 text-violet-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-300 font-semibold'
+                : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
             }`}
           >
-            <Terminal className="h-4 w-4 text-amber-400" />
+            <Terminal className="h-4 w-4 text-amber-500 dark:text-amber-400" />
             Security & Attack Simulator
           </button>
         </div>
@@ -653,23 +653,23 @@ export default function Home() {
         {activeTab === 'studio' && (
           <div className="space-y-6">
             {/* Persona Notice Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-violet-500/20 bg-gradient-to-r from-violet-950/40 to-slate-900/60 p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-slate-700 dark:border-violet-500/20 bg-slate-900 text-white p-4 shadow-sm">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 text-violet-300 border border-violet-500/30">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/30 text-violet-300 border border-violet-500/40">
                   <UserCheck className="h-5 w-5" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">
-                    Logged in as <span className="text-violet-300">{currentPersona.userName}</span> ({currentPersona.userEmail})
+                    Logged in as <span className="text-violet-300 font-bold">{currentPersona.userName}</span> ({currentPersona.userEmail})
                   </p>
-                  <p className="text-xs text-slate-400">
-                    Role: <span className="font-semibold text-amber-300 uppercase">{currentPersona.role}</span> · Delegated Authority Limit: <span className="text-white font-mono">{formatCurrency(currentPersona.approvalLimitCents)}</span>
+                  <p className="text-xs text-slate-300">
+                    Role: <span className="font-bold text-amber-400 uppercase">{currentPersona.role}</span> · Delegated Authority Limit: <span className="text-white font-mono font-bold">{formatCurrency(currentPersona.approvalLimitCents)}</span>
                   </p>
                 </div>
               </div>
-              <div className="text-xs text-slate-400 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5">
+              <div className="text-xs text-slate-200 bg-black/50 px-3 py-1.5 rounded-lg border border-white/10">
                 {currentPersona.role === 'requester' ? (
-                  <span className="text-slate-300">Can submit requests & create quotes. Approvals require VP Finance.</span>
+                  <span className="text-slate-200">Can submit requests & create quotes. Approvals require VP Finance.</span>
                 ) : (
                   <span className="text-emerald-300">Authorized to approve/reject quotes within budget threshold.</span>
                 )}
@@ -689,20 +689,20 @@ export default function Home() {
                   key={s.n}
                   className={`rounded-xl border p-3 transition ${
                     s.active
-                      ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-300'
+                      ? 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 font-medium'
                       : s.current
-                      ? 'border-violet-500/50 bg-violet-950/30 text-violet-200 glow-violet'
-                      : 'border-white/5 bg-white/[0.02] text-slate-500'
+                      ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30 text-violet-900 dark:text-violet-200 glow-violet font-semibold'
+                      : 'border-slate-200 dark:border-white/5 bg-slate-50/60 dark:bg-white/[0.02] text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
                         s.active
-                          ? 'bg-emerald-500 text-slate-950'
+                          ? 'bg-emerald-600 text-white'
                           : s.current
-                          ? 'bg-violet-500 text-white'
-                          : 'bg-white/10 text-slate-400'
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-400'
                       }`}
                     >
                       {s.active ? '✓' : s.n}
@@ -715,41 +715,41 @@ export default function Home() {
 
             {/* Step 1: Natural Language Purchase Input */}
             <div className="glass-panel rounded-3xl p-6 glow-violet">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-violet-400" />
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                     Step 1: Describe Purchase Intent
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                     AI parses natural-language requests into structured, schema-validated line items matching the approved catalogue.
                   </p>
                 </div>
 
                 {/* Pre-set chips */}
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="text-xs text-slate-500 self-center mr-1">Presets:</span>
+                  <span className="text-xs text-slate-600 dark:text-slate-400 self-center mr-1">Presets:</span>
                   <button
                     onClick={() => selectPreset('happy')}
-                    className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-slate-300 hover:bg-violet-500/20 hover:border-violet-500/40 hover:text-white transition"
+                    className="rounded-lg border border-slate-300 dark:border-white/10 bg-slate-100 dark:bg-white/5 px-2.5 py-1 text-xs text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 hover:border-violet-500/40 hover:text-violet-700 dark:hover:text-white transition font-medium"
                   >
                     2 Laptops ($5k Limit)
                   </button>
                   <button
                     onClick={() => selectPreset('overbudget')}
-                    className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1 text-xs text-amber-300 hover:bg-amber-500/20 transition"
+                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition font-medium"
                   >
                     Over-Budget Breach
                   </button>
                   <button
                     onClick={() => selectPreset('unapproved')}
-                    className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/20 transition"
+                    className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-700 dark:text-rose-300 hover:bg-rose-500/20 transition font-medium"
                   >
                     Unapproved Vendor
                   </button>
                   <button
                     onClick={() => selectPreset('monitors')}
-                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-2.5 py-1 text-xs text-[var(--text-secondary)] hover:bg-violet-500/10 hover:text-[var(--text-primary)] transition"
+                    className="rounded-lg border border-slate-300 dark:border-white/10 bg-slate-100 dark:bg-white/5 px-2.5 py-1 text-xs text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 hover:text-violet-700 dark:hover:text-white transition font-medium"
                   >
                     Monitors & Peripherals
                   </button>
@@ -758,25 +758,25 @@ export default function Home() {
 
               <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_200px]">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Purchase Instructions</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Purchase Instructions</label>
                   <textarea
                     rows={3}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder="e.g. Order 2 Dell XPS 15 laptops from AfriTech for our engineering team. Budget under $5,000."
-                    className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                    className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 transition shadow-xs"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Authorized Budget Cap ($)</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Authorized Budget Cap ($)</label>
                   <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-[var(--text-secondary)] text-sm">$</span>
+                    <span className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400 text-sm font-semibold">$</span>
                     <input
                       type="number"
                       value={budgetCap}
                       onChange={(e) => setBudgetCap(e.target.value)}
-                      className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] pl-7 pr-3 py-2.5 text-sm text-[var(--text-primary)] focus:border-violet-500 focus:outline-none"
+                      className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 pl-7 pr-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 transition shadow-xs"
                     />
                   </div>
                   <button
@@ -801,34 +801,34 @@ export default function Home() {
 
               {/* Parsed Structured Plan Display */}
               {structuredPlan && (
-                <div className="mt-5 rounded-2xl border border-violet-500/25 bg-violet-950/20 p-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+                <div className="mt-5 rounded-2xl border border-violet-200 dark:border-violet-500/25 bg-violet-50/50 dark:bg-violet-950/20 p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-white/10 pb-3">
                     <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-violet-300">Structured AI Plan Output</span>
-                      <h3 className="text-sm font-semibold text-white mt-0.5">{structuredPlan.summary}</h3>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">Structured AI Plan Output</span>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5">{structuredPlan.summary}</h3>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {structuredPlan.plannerSource === 'gemini' ? (
-                        <span className="rounded-full bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-300 border border-violet-400/30">
+                        <span className="rounded-full bg-violet-100 dark:bg-violet-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-400/30">
                           AI: Gemini ({structuredPlan.plannerModel || 'gemini-2.5-flash'})
                         </span>
                       ) : (
-                        <span className="rounded-full bg-blue-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-blue-300 border border-blue-400/30">
+                        <span className="rounded-full bg-blue-100 dark:bg-blue-400/15 px-2.5 py-0.5 text-[11px] font-semibold text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-400/30">
                           Planner: Deterministic Catalogue Engine
                         </span>
                       )}
-                      <span className="rounded-full bg-emerald-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-400/20">
+                      <span className="rounded-full bg-emerald-100 dark:bg-emerald-400/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-400/20">
                         Confidence: {(structuredPlan.confidenceScore * 100).toFixed(0)}%
                       </span>
-                      <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[11px] text-slate-300 border border-white/10">
+                      <span className="rounded-full bg-slate-100 dark:bg-white/5 px-2.5 py-0.5 text-[11px] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 font-mono">
                         Cap: {formatCurrency(structuredPlan.budgetLimitCents)}
                       </span>
                     </div>
                   </div>
 
                   {structuredPlan.clarificationNeeded && structuredPlan.clarificationQuestions && (
-                    <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-                      <div className="flex items-center gap-1.5 font-semibold text-amber-300 mb-1">
+                    <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200">
+                      <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300 mb-1">
                         <HelpCircle className="h-4 w-4" /> Clarification Required Before Quotation:
                       </div>
                       <ul className="list-disc pl-5 space-y-1">
@@ -842,24 +842,24 @@ export default function Home() {
                   <div className="mt-3 overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
-                        <tr className="border-b border-white/10 text-slate-400">
-                          <th className="pb-2 font-medium">SKU</th>
-                          <th className="pb-2 font-medium">Matched Item</th>
-                          <th className="pb-2 font-medium text-center">Qty</th>
-                          <th className="pb-2 font-medium text-right">Est. Unit Price</th>
-                          <th className="pb-2 font-medium text-right">Supplier</th>
+                        <tr className="border-b border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400">
+                          <th className="pb-2 font-semibold">SKU</th>
+                          <th className="pb-2 font-semibold">Matched Item</th>
+                          <th className="pb-2 font-semibold text-center">Qty</th>
+                          <th className="pb-2 font-semibold text-right">Est. Unit Price</th>
+                          <th className="pb-2 font-semibold text-right">Supplier</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5 text-slate-200">
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-800 dark:text-slate-200">
                         {structuredPlan.items.map((item, idx) => (
                           <tr key={idx}>
-                            <td className="py-2 font-mono text-[11px] text-violet-300">{item.sku || 'N/A'}</td>
+                            <td className="py-2 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-semibold">{item.sku || 'N/A'}</td>
                             <td className="py-2 font-medium">{item.productName}</td>
-                            <td className="py-2 text-center">{item.quantity}</td>
-                            <td className="py-2 text-right font-mono">
+                            <td className="py-2 text-center font-semibold">{item.quantity}</td>
+                            <td className="py-2 text-right font-mono font-medium">
                               {item.estimatedUnitPriceCents ? formatCurrency(item.estimatedUnitPriceCents) : 'TBD'}
                             </td>
-                            <td className="py-2 text-right text-slate-400">{item.suggestedSupplierName || 'AfriTech Solutions'}</td>
+                            <td className="py-2 text-right text-slate-600 dark:text-slate-400">{item.suggestedSupplierName || 'AfriTech Solutions'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -896,36 +896,36 @@ export default function Home() {
               <div className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
                 {/* Deterministic Quote Card */}
                 <div className="glass-panel rounded-3xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/10 pb-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-base font-bold text-white">Authoritative Server Quote</h3>
-                        <span className="rounded bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-300">
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white">Authoritative Server Quote</h3>
+                        <span className="rounded bg-violet-100 dark:bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-500/30">
                           VERSION {currentQuote.version}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">Supplier: {currentQuote.supplierName}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Supplier: <strong className="text-slate-800 dark:text-slate-200">{currentQuote.supplierName}</strong></p>
                     </div>
 
                     <div className="text-right">
-                      <p className="text-xs text-slate-400">Authoritative Total</p>
-                      <p className="text-xl font-bold font-mono text-emerald-400">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">Authoritative Total</p>
+                      <p className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
                         {formatCurrency(currentQuote.totalCents, currentQuote.currency)}
                       </p>
                     </div>
                   </div>
 
                   {/* Items List */}
-                  <div className="divide-y divide-white/5">
+                  <div className="divide-y divide-slate-100 dark:divide-white/5">
                     {currentQuote.items.map((item) => (
                       <div key={item.id} className="py-2.5 flex items-center justify-between text-xs">
                         <div>
-                          <p className="font-semibold text-white">{item.itemName}</p>
-                          <p className="font-mono text-[11px] text-slate-400">
+                          <p className="font-semibold text-slate-900 dark:text-white">{item.itemName}</p>
+                          <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
                             SKU: {item.sku} · {item.quantity} units @ {formatCurrency(item.unitPriceCents)}
                           </p>
                         </div>
-                        <span className="font-mono font-medium text-slate-200">
+                        <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
                           {formatCurrency(item.totalCents)}
                         </span>
                       </div>
@@ -933,43 +933,43 @@ export default function Home() {
                   </div>
 
                   {/* Pricing Breakdown */}
-                  <div className="rounded-xl bg-white/[0.03] p-3 text-xs space-y-1.5 border border-white/5 font-mono">
-                    <div className="flex justify-between text-slate-400">
+                  <div className="rounded-xl bg-slate-50 dark:bg-white/[0.03] p-3 text-xs space-y-1.5 border border-slate-200 dark:border-white/5 font-mono">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
                       <span>Subtotal:</span>
-                      <span>{formatCurrency(currentQuote.subtotalCents)}</span>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{formatCurrency(currentQuote.subtotalCents)}</span>
                     </div>
-                    <div className="flex justify-between text-slate-400">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
                       <span>VAT / Sales Tax (7.5%):</span>
-                      <span>{formatCurrency(currentQuote.taxCents)}</span>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{formatCurrency(currentQuote.taxCents)}</span>
                     </div>
-                    <div className="flex justify-between text-slate-400">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
                       <span>Insured Freight & Logistics:</span>
-                      <span>{formatCurrency(currentQuote.shippingCents)}</span>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{formatCurrency(currentQuote.shippingCents)}</span>
                     </div>
-                    <div className="border-t border-white/10 pt-1.5 flex justify-between font-bold text-sm text-white">
+                    <div className="border-t border-slate-200 dark:border-white/10 pt-1.5 flex justify-between font-bold text-sm text-slate-900 dark:text-white">
                       <span>Total (Minor Units: {currentQuote.totalCents} cents):</span>
-                      <span className="text-emerald-400">{formatCurrency(currentQuote.totalCents)}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{formatCurrency(currentQuote.totalCents)}</span>
                     </div>
                   </div>
 
                   {/* Cryptographic SHA-256 Checksum Seal */}
-                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
-                    <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)] mb-1">
-                      <span className="flex items-center gap-1 font-semibold text-violet-300">
+                  <div className="rounded-xl border border-slate-200 dark:border-[var(--border-subtle)] bg-slate-50/50 dark:bg-[var(--surface-card)] p-3">
+                    <div className="flex items-center justify-between text-[11px] text-slate-700 dark:text-[var(--text-secondary)] mb-1">
+                      <span className="flex items-center gap-1 font-semibold text-violet-700 dark:text-violet-300">
                         <Lock className="h-3 w-3" /> SHA-256 Cryptographic Integrity Seal:
                       </span>
                       <button
                         onClick={handleCopyHash}
-                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-white"
+                        className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                       >
-                        {copiedHash ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                        {copiedHash ? <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-3 w-3" />}
                         {copiedHash ? 'Copied' : 'Copy'}
                       </button>
                     </div>
-                    <p className="font-mono text-[10px] text-slate-300 break-all select-all bg-black/40 p-2 rounded border border-white/5">
+                    <p className="font-mono text-[10px] text-slate-800 dark:text-slate-300 break-all select-all bg-white dark:bg-black/40 p-2 rounded border border-slate-200 dark:border-white/5">
                       {currentQuote.checksumHash}
                     </p>
-                    <p className="text-[10px] text-slate-500 mt-1.5">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-500 mt-1.5">
                       Any quote tampering or price alteration invalidates this seal and revokes subsequent approvals.
                     </p>
                   </div>
@@ -977,20 +977,20 @@ export default function Home() {
 
                 {/* Policy Guardrails Card */}
                 <div className="glass-panel rounded-3xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/10 pb-4">
                     <div>
-                      <h3 className="text-base font-bold text-white flex items-center gap-2">
-                        <ShieldCheck className="h-5 w-5 text-violet-400" />
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <ShieldCheck className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                         Corporate Policy Guardrails
                       </h3>
-                      <p className="text-xs text-slate-400 mt-0.5">Automated rule verification against tenant governance</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Automated rule verification against tenant governance</p>
                     </div>
 
                     <span
                       className={`rounded-full px-2.5 py-1 text-xs font-bold border ${
                         policyResult?.passed
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                          : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                          ? 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+                          : 'border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 text-rose-800 dark:text-rose-300'
                       }`}
                     >
                       {policyResult?.passed ? 'ALL CHECKS PASSED' : 'POLICY VIOLATION'}
@@ -1004,33 +1004,33 @@ export default function Home() {
                         key={c.code}
                         className={`rounded-xl border p-3 text-xs transition ${
                           c.passed
-                            ? 'border-emerald-500/20 bg-emerald-950/10 text-slate-300'
-                            : 'border-rose-500/30 bg-rose-950/20 text-rose-200'
+                            ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-950/10 text-slate-800 dark:text-slate-300'
+                            : 'border-rose-300 dark:border-rose-500/30 bg-rose-50/80 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200'
                         }`}
                       >
                         <div className="flex items-center gap-2 font-semibold">
                           {c.passed ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                           ) : (
-                            <XCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                            <XCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0" />
                           )}
-                          <span className={c.passed ? 'text-white' : 'text-rose-300'}>{c.name}</span>
+                          <span className={c.passed ? 'text-slate-900 dark:text-white' : 'text-rose-800 dark:text-rose-300'}>{c.name}</span>
                         </div>
-                        <p className="mt-1 text-[11px] text-slate-400 pl-6 leading-relaxed">{c.message}</p>
+                        <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400 pl-6 leading-relaxed">{c.message}</p>
                       </div>
                     ))}
                   </div>
 
                   {/* Violations Summary */}
                   {policyResult && !policyResult.passed && (
-                    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                      <p className="font-semibold text-rose-300 mb-1">Governance Block Activated:</p>
+                    <div className="rounded-xl border border-rose-300 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 p-3 text-xs text-rose-900 dark:text-rose-200">
+                      <p className="font-semibold text-rose-800 dark:text-rose-300 mb-1">Governance Block Activated:</p>
                       <ul className="list-disc pl-5 space-y-1">
                         {policyResult.violations.map((v, idx) => (
                           <li key={idx}>{v}</li>
                         ))}
                       </ul>
-                      <p className="mt-2 text-[11px] text-slate-400">
+                      <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-400">
                         Adjust budget limit or choose an approved supplier to satisfy corporate procurement rules.
                       </p>
                     </div>
@@ -1042,13 +1042,13 @@ export default function Home() {
             {/* Step 4: Human Governance & Approval Gate */}
             {currentQuote && (
               <div className="glass-panel rounded-3xl p-6 glow-violet">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 pb-4">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <UserCheck className="h-5 w-5 text-amber-400" />
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <UserCheck className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                       Step 4: Human Approval Gate (Segregation of Duties)
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       An authorized approver must explicitly bind their digital signature to Quote Version {currentQuote.version} and total {formatCurrency(currentQuote.totalCents)}.
                     </p>
                   </div>
@@ -1057,8 +1057,8 @@ export default function Home() {
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-bold border ${
                         currentApproval.decision === 'approved'
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                          : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                          ? 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+                          : 'border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 text-rose-800 dark:text-rose-300'
                       }`}
                     >
                       {currentApproval.decision === 'approved' ? '✓ QUOTE APPROVED' : '✗ QUOTE REJECTED'}
@@ -1070,27 +1070,27 @@ export default function Home() {
                   <div className="mt-4 space-y-4">
                     {/* Persona validation warning */}
                     {currentPersona.role === 'requester' ? (
-                      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-start gap-3">
-                        <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="rounded-2xl border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                         <div>
-                          <p className="font-semibold text-amber-300">Approval Authority Required</p>
+                          <p className="font-semibold text-amber-800 dark:text-amber-300">Approval Authority Required</p>
                           <p className="mt-1 leading-relaxed">
-                            Current persona <span className="text-white font-bold">{currentPersona.userName}</span> has role <span className="uppercase font-bold text-white">{currentPersona.role}</span>.
+                            Current persona <strong className="text-slate-900 dark:text-white font-bold">{currentPersona.userName}</strong> has role <span className="uppercase font-bold text-slate-900 dark:text-white">{currentPersona.role}</span>.
                             Under the Segregation of Duties policy, purchases above $500 cannot be approved by requesters.
                           </p>
-                          <p className="mt-2 text-white font-medium">
-                            👉 Switch persona to <span className="text-violet-300 font-bold">Chidi (VP Finance)</span> in the top navigation bar to grant approval.
+                          <p className="mt-2 text-slate-900 dark:text-white font-medium">
+                            👉 Switch persona to <span className="text-violet-700 dark:text-violet-300 font-bold">Chidi (VP Finance)</span> in the top navigation bar to grant approval.
                           </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-200 flex items-center gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                      <div className="rounded-2xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 p-4 text-xs text-emerald-900 dark:text-emerald-200 flex items-center gap-3">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                         <div>
-                          <p className="font-semibold text-white">
+                          <p className="font-semibold text-slate-900 dark:text-white">
                             Authorized Approver: {currentPersona.userName} ({currentPersona.role.toUpperCase()})
                           </p>
-                          <p className="text-[11px] text-emerald-300 mt-0.5">
+                          <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
                             Approval threshold ({formatCurrency(currentPersona.approvalLimitCents)}) covers quote total of {formatCurrency(currentQuote.totalCents)}.
                           </p>
                         </div>
@@ -1103,13 +1103,13 @@ export default function Home() {
                         value={approvalNote}
                         onChange={(e) => setApprovalNote(e.target.value)}
                         placeholder="Optional approval note or justification (e.g. Q4 engineering team expansion approved)"
-                        className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-2.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:border-violet-500 focus:outline-none"
+                        className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleApproval('rejected')}
                           disabled={isApproving}
-                          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition disabled:opacity-50"
+                          className="rounded-xl border border-rose-300 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-4 py-2.5 text-xs font-semibold text-rose-800 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition disabled:opacity-50"
                         >
                           Reject
                         </button>
@@ -1134,26 +1134,26 @@ export default function Home() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-2 text-xs">
-                    <div className="flex items-center justify-between text-slate-300">
+                  <div className="mt-4 rounded-2xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/20 p-4 space-y-2 text-xs">
+                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                       <span>Approved By:</span>
-                      <span className="font-semibold text-white">
+                      <span className="font-semibold text-slate-900 dark:text-white">
                         {currentApproval.approverName} ({currentApproval.approverRole.toUpperCase()})
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-300">
+                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                       <span>Bound Quote Version:</span>
-                      <span className="font-mono font-bold text-violet-300">v{currentApproval.quoteVersion}</span>
+                      <span className="font-mono font-bold text-violet-700 dark:text-violet-300">v{currentApproval.quoteVersion}</span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-300">
+                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                       <span>Approved Amount:</span>
-                      <span className="font-mono font-bold text-emerald-400">
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
                         {formatCurrency(currentApproval.approvedTotalCents, currentApproval.approvedCurrency)}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-300">
+                    <div className="flex items-center justify-between text-slate-700 dark:text-slate-300">
                       <span>Digital Signature Seal:</span>
-                      <span className="font-mono text-[10px] text-slate-400 truncate max-w-xs">
+                      <span className="font-mono text-[10px] text-slate-600 dark:text-slate-400 truncate max-w-xs">
                         {currentApproval.digitalSignature}
                       </span>
                     </div>
@@ -1165,13 +1165,13 @@ export default function Home() {
             {/* Step 5: PayPal Sandbox Execution */}
             {currentApproval?.decision === 'approved' && currentQuote && (
               <div className="glass-panel rounded-3xl p-6 glow-violet">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-white/10 pb-4">
                   <div>
-                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                      <CreditCard className="h-5 w-5 text-cyan-400" />
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <CreditCard className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
                       Step 5: PayPal Sandbox Payment Execution
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       Server-side order initialization and capture strictly bound to approved quote record.
                     </p>
                   </div>
@@ -1179,12 +1179,12 @@ export default function Home() {
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-bold border ${
                       paymentAttempt?.status === 'captured'
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        ? 'border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
                         : paymentAttempt?.status === 'created'
-                        ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                        ? 'border-cyan-500/40 bg-cyan-50 dark:bg-cyan-500/10 text-cyan-800 dark:text-cyan-300'
                         : paymentAttempt?.status === 'failed'
-                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                        : 'border-white/10 text-slate-400'
+                        ? 'border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                        : 'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400'
                     }`}
                   >
                     STATUS:{' '}
@@ -1196,18 +1196,18 @@ export default function Home() {
                 </div>
 
                 {!paymentAttempt ? (
-                  <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl glass-panel p-4">
+                  <div className="mt-5 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.02] p-4">
                     <div>
-                      <p className="text-sm font-semibold text-white">Create PayPal Sandbox Order</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Amount to authorize: <span className="font-mono text-emerald-400 font-bold">{formatCurrency(currentQuote.totalCents)}</span> ({centsToDecimalString(currentQuote.totalCents)} USD)
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">Create PayPal Sandbox Order</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                        Amount to authorize: <span className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">{formatCurrency(currentQuote.totalCents)}</span> ({centsToDecimalString(currentQuote.totalCents)} USD)
                       </p>
                     </div>
 
                     <button
                       onClick={handleCreatePayPalOrder}
                       disabled={isCreatingOrder}
-                      className="rounded-xl bg-[#0070ba] hover:bg-[#005ea6] px-5 py-2.5 text-xs font-semibold text-white transition flex items-center gap-2 shadow-lg shadow-blue-900/30"
+                      className="rounded-xl bg-[#0070ba] hover:bg-[#005ea6] px-5 py-2.5 text-xs font-semibold text-white transition flex items-center gap-2 shadow-lg shadow-blue-900/20"
                     >
                       {isCreatingOrder ? (
                         <>
@@ -1225,58 +1225,58 @@ export default function Home() {
                   </div>
                 ) : paymentAttempt.status === 'created' || paymentAttempt.status === 'failed' ? (
                   <div className="mt-5 space-y-4">
-                    <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/20 p-4 text-xs space-y-2">
+                    <div className="rounded-2xl border border-cyan-300 dark:border-cyan-500/30 bg-cyan-50/60 dark:bg-cyan-950/20 p-4 text-xs space-y-2">
                       <div className="flex justify-between">
-                        <span className="text-slate-400">PayPal Order ID:</span>
-                        <span className="font-mono font-bold text-cyan-300">{paymentAttempt.providerOrderId}</span>
+                        <span className="text-slate-600 dark:text-slate-400">PayPal Order ID:</span>
+                        <span className="font-mono font-bold text-cyan-800 dark:text-cyan-300">{paymentAttempt.providerOrderId}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Order Amount:</span>
-                        <span className="font-mono font-bold text-white">{formatCurrency(paymentAttempt.amountCents)}</span>
+                        <span className="text-slate-600 dark:text-slate-400">Order Amount:</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(paymentAttempt.amountCents)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Idempotency Key:</span>
-                        <span className="font-mono text-slate-400 text-[10px]">{paymentAttempt.idempotencyKey}</span>
+                        <span className="text-slate-600 dark:text-slate-400">Idempotency Key:</span>
+                        <span className="font-mono text-slate-600 dark:text-slate-400 text-[10px]">{paymentAttempt.idempotencyKey}</span>
                       </div>
                     </div>
 
                     {/* Authorization Pending Notice */}
                     {paymentAttempt.status === 'failed' &&
                       paymentAttempt.errorMessage?.includes('ORDER_NOT_APPROVED') && (
-                        <div className="rounded-2xl border border-amber-500/30 bg-amber-950/30 p-4 text-xs space-y-2">
-                          <div className="flex items-center gap-2 font-semibold text-amber-300">
-                            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                        <div className="rounded-2xl border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-950/30 p-4 text-xs space-y-2">
+                          <div className="flex items-center gap-2 font-semibold text-amber-800 dark:text-amber-300">
+                            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
                             <span>Buyer Authorization Required in PayPal Sandbox</span>
                           </div>
-                          <p className="text-slate-300 text-[11px] leading-relaxed">
-                            PayPal returned <code className="text-amber-200">ORDER_NOT_APPROVED</code>:
+                          <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed">
+                            PayPal returned <code className="text-amber-800 dark:text-amber-200 font-bold">ORDER_NOT_APPROVED</code>:
                             The buyer has not authorized the order on PayPal Sandbox yet.
                           </p>
-                          <ol className="list-decimal pl-5 text-[11px] text-slate-400 space-y-1 mt-1">
+                          <ol className="list-decimal pl-5 text-[11px] text-slate-700 dark:text-slate-400 space-y-1 mt-1">
                             <li>
-                              Click the blue <strong className="text-white">"Authorize on PayPal Sandbox"</strong> button below to open PayPal checkout.
+                              Click the blue <strong className="text-blue-700 dark:text-white font-semibold">"Authorize on PayPal Sandbox"</strong> button below to open PayPal checkout.
                             </li>
                             <li>
                               Log in using your Sandbox Personal buyer account (from PayPal Developer Dashboard &rarr; Testing Tools &rarr; Sandbox Accounts).
                             </li>
                             <li>
-                              Click <strong className="text-white">"Agree & Pay"</strong> or <strong className="text-white">"Complete Purchase"</strong> on PayPal.
+                              Click <strong className="text-blue-700 dark:text-white font-semibold">"Agree & Pay"</strong> or <strong className="text-blue-700 dark:text-white font-semibold">"Complete Purchase"</strong> on PayPal.
                             </li>
                             <li>
-                              Return to this tab and click <strong className="text-emerald-400">"Retry Server-Side Capture"</strong>.
+                              Return to this tab and click <strong className="text-emerald-700 dark:text-emerald-400 font-semibold">"Retry Server-Side Capture"</strong>.
                             </li>
                           </ol>
                         </div>
                       )}
 
                     {approveUrl && (
-                      <div className="rounded-2xl border border-blue-500/30 bg-blue-950/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="rounded-2xl border border-blue-300 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-950/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
                         <div>
-                          <p className="text-xs font-semibold text-blue-200 flex items-center gap-2">
-                            <ExternalLink className="h-4 w-4 text-blue-400" />
+                          <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 flex items-center gap-2">
+                            <ExternalLink className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                             Step 5A: Authorize Order on PayPal
                           </p>
-                          <p className="text-[11px] text-slate-400 mt-0.5">
+                          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
                             Open PayPal Sandbox checkout to approve payment using your sandbox buyer account.
                           </p>
                         </div>
@@ -1284,7 +1284,7 @@ export default function Home() {
                           href={approveUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="rounded-xl bg-[#0070ba] hover:bg-[#005ea6] px-4 py-2.5 text-xs font-semibold text-white transition flex items-center gap-1.5 shrink-0 shadow-lg shadow-blue-900/30"
+                          className="rounded-xl bg-[#0070ba] hover:bg-[#005ea6] px-4 py-2.5 text-xs font-semibold text-white transition flex items-center gap-1.5 shrink-0 shadow-lg shadow-blue-900/20"
                         >
                           <span>Authorize on PayPal Sandbox</span>
                           <ExternalLink className="h-3.5 w-3.5" />
@@ -1292,10 +1292,10 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl border border-white/10 bg-black/40">
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-black/40">
                       <div>
-                        <p className="text-xs font-semibold text-white">Step 5B: Server-Side Capture</p>
-                        <p className="text-[11px] text-slate-400">
+                        <p className="text-xs font-semibold text-slate-900 dark:text-white">Step 5B: Server-Side Capture</p>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
                           {approveUrl
                             ? 'After authorizing on PayPal Sandbox, click below to finalize and record in the ledger.'
                             : 'Click capture to finalize order and record authoritative capture in the ledger.'}
@@ -1324,34 +1324,34 @@ export default function Home() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5 space-y-3">
-                    <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                  <div className="mt-5 rounded-2xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/20 p-5 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-sm">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                       Payment Verified & Authoritative Ledger Reconciled
                     </div>
                     <div className="grid sm:grid-cols-2 gap-3 text-xs">
-                      <div className="rounded-xl bg-black/40 p-3 border border-white/5 space-y-1">
-                        <p className="text-slate-400 text-[11px]">Provider Order ID</p>
-                        <p className="font-mono font-semibold text-white">{paymentAttempt.providerOrderId}</p>
+                      <div className="rounded-xl bg-white dark:bg-black/40 p-3 border border-slate-200 dark:border-white/5 space-y-1 shadow-xs">
+                        <p className="text-slate-600 dark:text-slate-400 text-[11px]">Provider Order ID</p>
+                        <p className="font-mono font-semibold text-slate-900 dark:text-white">{paymentAttempt.providerOrderId}</p>
                       </div>
-                      <div className="rounded-xl bg-black/40 p-3 border border-white/5 space-y-1">
-                        <p className="text-slate-400 text-[11px]">Provider Capture ID</p>
-                        <p className="font-mono font-semibold text-emerald-300">{paymentAttempt.providerCaptureId}</p>
+                      <div className="rounded-xl bg-white dark:bg-black/40 p-3 border border-slate-200 dark:border-white/5 space-y-1 shadow-xs">
+                        <p className="text-slate-600 dark:text-slate-400 text-[11px]">Provider Capture ID</p>
+                        <p className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">{paymentAttempt.providerCaptureId}</p>
                       </div>
-                      <div className="rounded-xl bg-black/40 p-3 border border-white/5 space-y-1">
-                        <p className="text-slate-400 text-[11px]">Total Paid</p>
-                        <p className="font-mono font-semibold text-white">{formatCurrency(paymentAttempt.amountCents)}</p>
+                      <div className="rounded-xl bg-white dark:bg-black/40 p-3 border border-slate-200 dark:border-white/5 space-y-1 shadow-xs">
+                        <p className="text-slate-600 dark:text-slate-400 text-[11px]">Total Paid</p>
+                        <p className="font-mono font-semibold text-slate-900 dark:text-white">{formatCurrency(paymentAttempt.amountCents)}</p>
                       </div>
-                      <div className="rounded-xl bg-black/40 p-3 border border-white/5 space-y-1">
-                        <p className="text-slate-400 text-[11px]">Authoritative Status</p>
-                        <p className="font-semibold text-emerald-400 uppercase">COMPLETED & VERIFIED</p>
+                      <div className="rounded-xl bg-white dark:bg-black/40 p-3 border border-slate-200 dark:border-white/5 space-y-1 shadow-xs">
+                        <p className="text-slate-600 dark:text-slate-400 text-[11px]">Authoritative Status</p>
+                        <p className="font-semibold text-emerald-700 dark:text-emerald-400 uppercase">COMPLETED & VERIFIED</p>
                       </div>
                     </div>
 
                     <div className="pt-2 flex justify-end">
                       <button
                         onClick={() => setActiveTab('ledger')}
-                        className="text-xs text-violet-300 hover:text-violet-200 flex items-center gap-1 font-medium"
+                        className="text-xs text-violet-700 dark:text-violet-300 hover:text-violet-900 dark:hover:text-violet-200 flex items-center gap-1 font-semibold"
                       >
                         View Full Immutable Event Trail in Ledger →
                       </button>
@@ -1368,18 +1368,18 @@ export default function Home() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Database className="h-5 w-5 text-violet-400" />
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Database className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                   Append-Only Authoritative Ledger
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                   Cryptographically traceable chronological event stream for all procurement activities.
                 </p>
               </div>
 
               <button
                 onClick={refreshLedger}
-                className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 transition"
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-white/10 bg-slate-100 dark:bg-white/5 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 transition font-medium"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 Refresh Events
@@ -1387,9 +1387,9 @@ export default function Home() {
             </div>
 
             {/* Supabase PostgreSQL Integration Banner */}
-            <div className="glass-panel rounded-2xl p-4 border border-violet-500/20 bg-gradient-to-r from-slate-900/90 via-violet-950/20 to-slate-900/90 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+            <div className="glass-panel rounded-2xl p-4 border border-violet-200 dark:border-violet-500/20 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shadow-sm">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-300">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/30 border border-violet-500/40 text-violet-300">
                   <Database className="h-4 w-4" />
                 </div>
                 <div>
@@ -1402,8 +1402,8 @@ export default function Home() {
                       APPEND-ONLY AUDIT
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Schema migrations: <span className="font-mono text-slate-300">supabase/migrations/00001_initial_schema.sql</span> · Seed data: <span className="font-mono text-slate-300">supabase/seed.sql</span>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    Schema migrations: <span className="font-mono text-slate-200">supabase/migrations/00001_initial_schema.sql</span> · Seed data: <span className="font-mono text-slate-200">supabase/seed.sql</span>
                   </p>
                 </div>
               </div>
@@ -1411,26 +1411,26 @@ export default function Home() {
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono text-[11px] ${
                   isSupabaseConnected
                     ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-white/5 text-slate-400 border border-white/10'
+                    : 'bg-white/10 text-slate-200 border border-white/20'
                 }`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
                   {isSupabaseConnected ? 'Live Supabase Connected' : 'Supabase Client Ready (Dual-Write Store Active)'}
                 </span>
               </div>
             </div>
 
             {auditEvents.length === 0 ? (
-              <div className="glass-panel rounded-3xl p-12 text-center text-slate-500">
-                <Database className="mx-auto h-10 w-10 text-slate-600 mb-3" />
-                <p className="text-sm font-medium">No audit events recorded yet.</p>
-                <p className="text-xs text-slate-600 mt-1">Start a purchase in the Procurement Studio to observe live events.</p>
+              <div className="glass-panel rounded-3xl p-12 text-center text-slate-600 dark:text-slate-400">
+                <Database className="mx-auto h-10 w-10 text-slate-400 dark:text-slate-600 mb-3" />
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">No audit events recorded yet.</p>
+                <p className="text-xs text-slate-500 dark:text-slate-600 mt-1">Start a purchase in the Procurement Studio to observe live events.</p>
               </div>
             ) : (
-              <div className="glass-panel rounded-3xl overflow-hidden border border-white/10">
+              <div className="glass-panel rounded-3xl overflow-hidden border border-slate-200 dark:border-white/10">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
-                      <tr className="border-b border-white/10 bg-white/[0.02] text-slate-400">
+                      <tr className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] text-slate-700 dark:text-slate-400">
                         <th className="py-3 px-4 font-semibold">Timestamp</th>
                         <th className="py-3 px-4 font-semibold">Action</th>
                         <th className="py-3 px-4 font-semibold">Entity Type</th>
@@ -1438,34 +1438,34 @@ export default function Home() {
                         <th className="py-3 px-4 font-semibold">Event Payload</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5 text-slate-300">
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-800 dark:text-slate-300">
                       {auditEvents.map((event) => (
-                        <tr key={event.id} className="hover:bg-white/[0.02] transition">
-                          <td className="py-3 px-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                        <tr key={event.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02] transition">
+                          <td className="py-3 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
                             {new Date(event.createdAt).toLocaleTimeString()}
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span
                               className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${
                                 event.action.includes('PAYMENT_CAPTURED') || event.action.includes('APPROVED')
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30'
                                   : event.action.includes('REJECTED') || event.action.includes('VIOLATION')
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-500/30'
                                   : event.action.includes('QUOTE')
-                                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                                  : 'bg-white/10 text-slate-300'
+                                  ? 'bg-violet-100 dark:bg-violet-500/20 text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-500/30'
+                                  : 'bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-slate-300'
                               }`}
                             >
                               {event.action}
                             </span>
                           </td>
-                          <td className="py-3 px-4 uppercase text-[11px] text-slate-400">{event.entityType}</td>
+                          <td className="py-3 px-4 uppercase text-[11px] text-slate-600 dark:text-slate-400 font-medium">{event.entityType}</td>
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="font-medium text-white">{event.actorId}</span>{' '}
+                            <span className="font-semibold text-slate-900 dark:text-white">{event.actorId}</span>{' '}
                             <span className="text-[10px] text-slate-500">({event.actorRole})</span>
                           </td>
                           <td className="py-3 px-4 max-w-md">
-                            <pre className="font-mono text-[10px] text-slate-400 bg-black/40 p-2 rounded overflow-x-auto max-h-24">
+                            <pre className="font-mono text-[10px] text-slate-700 dark:text-slate-400 bg-slate-100 dark:bg-black/40 p-2 rounded border border-slate-200 dark:border-white/5 overflow-x-auto max-h-24">
                               {JSON.stringify(event.payload, null, 2)}
                             </pre>
                           </td>
@@ -1483,11 +1483,11 @@ export default function Home() {
         {activeTab === 'catalogue' && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Layers className="h-5 w-5 text-violet-400" />
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Layers className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                 Supplier Registry & Product Catalogue
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 Authoritative catalogue fixtures priced strictly in integer minor units (cents).
               </p>
             </div>
@@ -1498,28 +1498,28 @@ export default function Home() {
                 <div
                   key={s.id}
                   className={`glass-panel rounded-2xl p-5 border ${
-                    s.isApproved ? 'border-emerald-500/30' : 'border-rose-500/40 bg-rose-950/10'
+                    s.isApproved ? 'border-emerald-300 dark:border-emerald-500/30' : 'border-rose-300 dark:border-rose-500/40 bg-rose-50/60 dark:bg-rose-950/10'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-slate-400">{s.code}</span>
+                    <span className="font-mono text-xs text-slate-600 dark:text-slate-400">{s.code}</span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         s.isApproved
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-rose-500/20 text-rose-300'
+                          ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30'
+                          : 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-500/30'
                       }`}
                     >
                       {s.isApproved ? 'APPROVED VENDOR' : 'UNAPPROVED (BLOCKED)'}
                     </span>
                   </div>
-                  <h3 className="mt-2 font-bold text-white text-base">{s.name}</h3>
-                  <p className="text-xs text-slate-400 mt-1">Country: {s.country} · Contact: {s.contactEmail}</p>
+                  <h3 className="mt-2 font-bold text-slate-900 dark:text-white text-base">{s.name}</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Country: {s.country} · Contact: {s.contactEmail}</p>
                   <div className="mt-3 flex items-center gap-2 text-xs">
                     <span className="text-slate-500">Risk Rating:</span>
                     <span
                       className={`font-semibold uppercase text-[11px] ${
-                        s.riskRating === 'low' ? 'text-emerald-400' : 'text-rose-400'
+                        s.riskRating === 'low' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                       }`}
                     >
                       {s.riskRating}
@@ -1530,34 +1530,34 @@ export default function Home() {
             </div>
 
             {/* Products Table */}
-            <div className="glass-panel rounded-3xl overflow-hidden border border-white/10 p-5">
-              <h3 className="text-sm font-bold text-white mb-3">Catalogue Products</h3>
+            <div className="glass-panel rounded-3xl overflow-hidden border border-slate-200 dark:border-white/10 p-5">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">Catalogue Products</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
-                    <tr className="border-b border-white/10 text-slate-400">
-                      <th className="pb-2 font-medium">SKU</th>
-                      <th className="pb-2 font-medium">Item Name & Specs</th>
-                      <th className="pb-2 font-medium">Category</th>
-                      <th className="pb-2 font-medium">Supplier</th>
-                      <th className="pb-2 font-medium text-right">Minor Units</th>
-                      <th className="pb-2 font-medium text-right">Unit Price</th>
+                    <tr className="border-b border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400">
+                      <th className="pb-2 font-semibold">SKU</th>
+                      <th className="pb-2 font-semibold">Item Name & Specs</th>
+                      <th className="pb-2 font-semibold">Category</th>
+                      <th className="pb-2 font-semibold">Supplier</th>
+                      <th className="pb-2 font-semibold text-right">Minor Units</th>
+                      <th className="pb-2 font-semibold text-right">Unit Price</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 text-slate-300">
+                  <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-800 dark:text-slate-300">
                     {DEMO_PRODUCTS.map((p) => {
                       const sup = DEMO_SUPPLIERS.find((s) => s.id === p.supplierId);
                       return (
                         <tr key={p.id}>
-                          <td className="py-2.5 font-mono text-[11px] text-violet-300">{p.sku}</td>
+                          <td className="py-2.5 font-mono text-[11px] text-violet-700 dark:text-violet-300 font-semibold">{p.sku}</td>
                           <td className="py-2.5">
-                            <p className="font-semibold text-white">{p.name}</p>
-                            <p className="text-[11px] text-slate-400">{p.description}</p>
+                            <p className="font-semibold text-slate-900 dark:text-white">{p.name}</p>
+                            <p className="text-[11px] text-slate-600 dark:text-slate-400">{p.description}</p>
                           </td>
-                          <td className="py-2.5 text-slate-400">{p.category}</td>
-                          <td className="py-2.5 text-slate-400">{sup?.name}</td>
-                          <td className="py-2.5 font-mono text-right text-slate-400">{p.unitPriceCents} ¢</td>
-                          <td className="py-2.5 font-mono font-bold text-right text-white">
+                          <td className="py-2.5 text-slate-600 dark:text-slate-400">{p.category}</td>
+                          <td className="py-2.5 text-slate-600 dark:text-slate-400">{sup?.name}</td>
+                          <td className="py-2.5 font-mono text-right text-slate-600 dark:text-slate-400">{p.unitPriceCents} ¢</td>
+                          <td className="py-2.5 font-mono font-bold text-right text-slate-900 dark:text-white">
                             {formatCurrency(p.unitPriceCents, p.currency)}
                           </td>
                         </tr>
@@ -1574,11 +1574,11 @@ export default function Home() {
         {activeTab === 'security' && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Terminal className="h-5 w-5 text-amber-400" />
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Terminal className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                 Adversarial Security & Attack Simulator
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 Interactive playground for judges and auditors to trigger adversarial attacks and verify system defense guardrails in real time.
               </p>
             </div>
@@ -1617,24 +1617,24 @@ export default function Home() {
                   defense: 'Webhook deduplication detects duplicate provider event ID and rejects replay execution.',
                 },
               ].map((atk) => (
-                <div key={atk.key} className="glass-panel rounded-2xl p-5 border border-white/10 space-y-3">
+                <div key={atk.key} className="glass-panel rounded-2xl p-5 border border-slate-200 dark:border-white/10 space-y-3">
                   <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <Lock className="h-4 w-4 text-amber-400" />
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Lock className="h-4 w-4 text-amber-500 dark:text-amber-400" />
                       {atk.title}
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">{atk.desc}</p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{atk.desc}</p>
                   </div>
 
-                  <div className="rounded-xl bg-black/40 p-3 border border-white/5 text-[11px] text-slate-300">
-                    <span className="font-semibold text-emerald-400">Security Control: </span>
+                  <div className="rounded-xl bg-slate-50 dark:bg-black/40 p-3 border border-slate-200 dark:border-white/5 text-[11px] text-slate-700 dark:text-slate-300">
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">Security Control: </span>
                     {atk.defense}
                   </div>
 
                   <button
                     onClick={() => runAdversarialAttack(atk.key)}
                     disabled={Boolean(runningAttack)}
-                    className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-4 py-2 text-xs font-semibold text-amber-300 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 px-4 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300 transition flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {runningAttack === atk.key ? (
                       <>
@@ -1655,16 +1655,16 @@ export default function Home() {
             {/* Attack Execution Result Banner */}
             {attackResult && (
               <div className="glass-panel rounded-3xl p-6 border border-emerald-500/40 glow-emerald">
-                <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
-                  <ShieldCheck className="h-6 w-6 text-emerald-400" />
+                <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-base">
+                  <ShieldCheck className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
                   {attackResult.title} — Defense Verified
                 </div>
-                <p className="mt-2 text-sm text-slate-200 leading-relaxed font-mono bg-black/50 p-4 rounded-xl border border-white/10">
+                <p className="mt-2 text-sm text-slate-900 dark:text-slate-200 leading-relaxed font-mono bg-slate-100 dark:bg-black/50 p-4 rounded-xl border border-slate-200 dark:border-white/10">
                   {attackResult.serverMessage}
                 </p>
                 {attackResult.details && (
-                  <p className="mt-2 text-xs text-slate-400">
-                    Telemetry: <span className="font-mono text-slate-300">{attackResult.details}</span>
+                  <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                    Telemetry: <span className="font-mono text-slate-800 dark:text-slate-300">{attackResult.details}</span>
                   </p>
                 )}
               </div>
@@ -1674,7 +1674,7 @@ export default function Home() {
       </div>
 
       {/* Footer */}
-      <footer className="mx-auto mt-14 max-w-7xl px-4 text-center text-xs text-slate-500 sm:px-6 lg:px-8 border-t border-white/5 pt-6">
+      <footer className="mx-auto mt-14 max-w-7xl px-4 text-center text-xs text-slate-500 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-white/5 pt-6">
         <p>ActionOS Pay · PayPal AI Hackathon Governance Prototype · Minor Units Integer Financial Precision · Sandbox Only</p>
       </footer>
     </main>
