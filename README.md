@@ -185,5 +185,5 @@ ActionOS Pay implements a durable recovery worker architecture for abandoned wor
 
 - **Hackathon**: PayPal AI Hackathon 2026 (Devpost)
 - **Submission Deadline**: November 12, 2026 at 12:00 PM PT (9:00 PM WAT)
-- **Demo Video**: [3-Minute YouTube Walkthrough](#) *(Lagos SME B2B procurement, Gemini AI intent planning, dual-control approval, and PayPal Sandbox checkout — video link will be populated upon final Devpost submission)*
+- **Demo Video**: [3-Minute YouTube Walkthrough (Live Demonstration)](https://youtu.be/G8xovGY7Yos) *(Lagos SME B2B procurement, Gemini AI intent planning, dual-control approval, and PayPal Sandbox checkout)*
 - **License**: MIT
