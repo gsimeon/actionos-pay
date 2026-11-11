@@ -321,7 +321,8 @@ export function verifyCaptureFinancialIntegrity(
         amount?: { currency_code?: string; value?: string };
       }
     | undefined,
-  paymentAttempt: PaymentAttempt
+  paymentAttempt: PaymentAttempt,
+  options?: { allowPending?: boolean }
 ): CaptureIntegrityVerification {
   if (!capture) {
     return { valid: false, error: 'Order does not contain an existing capture record in payments.captures.' };
@@ -330,7 +331,10 @@ export function verifyCaptureFinancialIntegrity(
   if (!captureId) {
     return { valid: false, error: 'Capture record is missing a valid capture ID.' };
   }
-  if (capture.status !== 'COMPLETED') {
+  const normalizedStatus = capture.status?.toUpperCase();
+  const isCompleted = normalizedStatus === 'COMPLETED';
+  const isAllowedPending = Boolean(options?.allowPending && normalizedStatus === 'PENDING');
+  if (!isCompleted && !isAllowedPending) {
     return {
       valid: false,
       error: `Capture status is "${capture.status}", expected "COMPLETED" for verified payment settlement.`,
@@ -513,7 +517,7 @@ export async function capturePayPalOrder(params: {
       const captureObj = captureData.purchase_units?.[0]?.payments?.captures?.[0];
 
       // Rigorous Financial Capture Verification: Never manufacture capture IDs or accept invalid captures
-      const captureVerification = verifyCaptureFinancialIntegrity(captureObj, paymentAttempt);
+      const captureVerification = verifyCaptureFinancialIntegrity(captureObj, paymentAttempt, { allowPending: true });
       if (!captureVerification.valid) {
         const failedAttempt: PaymentAttempt = {
           ...paymentAttempt,

@@ -127,6 +127,43 @@ export async function POST(req: Request) {
     }
 
     if (claim.status === 'FAILED') {
+      // If real PayPal credentials exist, check if the live order was actually completed in PayPal
+      if (creds && !isSimulatedOrder) {
+        try {
+          const liveOrder = await getPayPalOrderDetails(orderId);
+          const liveStatus = String(liveOrder.status || '').toUpperCase();
+          if (liveStatus === 'COMPLETED') {
+            const orderIntegrity = verifyOrderFinancialIntegrity(liveOrder, paymentAttempt);
+            if (orderIntegrity.valid) {
+              const captures = orderIntegrity.captures;
+              const captureObj = captures && captures.length > 0 ? captures[0] : undefined;
+              const captureCheck = verifyCaptureFinancialIntegrity(captureObj, paymentAttempt, { allowPending: true });
+              if (captureCheck.valid && captureCheck.captureId) {
+                const reconciledAttempt: PaymentAttempt = {
+                  ...paymentAttempt,
+                  status: 'captured',
+                  providerCaptureId: captureCheck.captureId,
+                  providerResponse: liveOrder,
+                  errorMessage: undefined,
+                  updatedAt: new Date().toISOString(),
+                };
+                await LedgerEngine.savePaymentAttemptAsync(reconciledAttempt);
+                return NextResponse.json({
+                  success: true,
+                  captureId: captureCheck.captureId,
+                  status: 'COMPLETED',
+                  paymentAttempt: reconciledAttempt,
+                  isSimulated: false,
+                  isReplay: true,
+                });
+              }
+            }
+          }
+        } catch {
+          // If live check fails or order is not completed, fall through to 402 response below
+        }
+      }
+
       return NextResponse.json(
         {
           success: false,
@@ -181,7 +218,7 @@ export async function POST(req: Request) {
       if (liveStatus === 'COMPLETED') {
         const captures = orderIntegrity.captures;
         const captureObj = captures && captures.length > 0 ? captures[0] : undefined;
-        const captureCheck = verifyCaptureFinancialIntegrity(captureObj, activeAttempt);
+        const captureCheck = verifyCaptureFinancialIntegrity(captureObj, activeAttempt, { allowPending: true });
 
         if (!captureCheck.valid || !captureCheck.captureId) {
           await LedgerEngine.releasePaymentCaptureClaimAsync(
