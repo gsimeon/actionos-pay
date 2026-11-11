@@ -8,6 +8,7 @@ import {
   resolveAuthoritativeSupplierAsync,
   resolveAuthoritativeBusinessBudgetLimitAsync,
 } from './catalog';
+import { isSupabaseConfigured } from './supabase';
 import { formatCurrency } from './currency';
 import { verifyQuoteIntegrity } from './quote-engine';
 import { PolicyCheckItem, PolicyEvaluationResult, Quote, Supplier, TeamMember } from './types';
@@ -30,7 +31,13 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
   const violations: string[] = [];
 
   // 1. Supplier Approval & Tenant Ownership Check
-  const supplier = params.supplier || getSupplierById(quote.supplierId);
+  const isSupabase = isSupabaseConfigured();
+  const supplier =
+    params.supplier !== undefined
+      ? params.supplier
+      : isSupabase
+      ? undefined // Strict fail-closed: Never fall back to local demo fixtures when Supabase is configured
+      : getSupplierById(quote.supplierId);
   const supplierApproved = Boolean(supplier && supplier.isApproved);
   const supplierMatchesTenant = Boolean(
     supplier && (!supplier.businessId || supplier.businessId === quote.businessId)
@@ -46,7 +53,9 @@ export function evaluatePolicy(params: EvaluatePolicyParams): PolicyEvaluationRe
   } else {
     let errorMsg: string;
     if (!supplier) {
-      errorMsg = `Supplier "${quote.supplierId}" was not found in the approved supplier registry. Purchases from unrecognized vendors are blocked.`;
+      errorMsg = isSupabase
+        ? `Supplier "${quote.supplierId}" was not found in the organization's database supplier registry. Purchases from unrecognized vendors are blocked.`
+        : `Supplier "${quote.supplierId}" was not found in the approved supplier registry. Purchases from unrecognized vendors are blocked.`;
     } else if (!supplierMatchesTenant) {
       errorMsg = `Cross-tenant supplier violation: Supplier "${supplier.name}" belongs to business "${supplier.businessId}" and is NOT authorized for business "${quote.businessId}". Purchases across organizational boundaries are strictly prohibited.`;
     } else {
