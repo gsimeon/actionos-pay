@@ -78,12 +78,14 @@ describe('Phase 23: Final Payment Security & Hackathon Release Gate', () => {
       // Quote uses DEMO_SUPPLIERS[0].id (a fixture ID)
       const quote: Quote = {
         id: 'quote-test-p23-sup-1',
+        requestId: 'req-test-p23-sup-1',
         businessId: DEMO_BUSINESS.id,
         supplierId: DEMO_SUPPLIERS[0].id,
         supplierName: DEMO_SUPPLIERS[0].name,
         items: [
           {
-            itemId: 'item-1',
+            id: 'item-1',
+            quoteId: 'quote-test-p23-sup-1',
             itemName: 'Laptop',
             quantity: 1,
             unitPriceCents: 150000,
@@ -96,8 +98,9 @@ describe('Phase 23: Final Payment Security & Hackathon Release Gate', () => {
         totalCents: 150000,
         currency: 'USD',
         version: 1,
-        checksum: 'dummy-checksum',
-        validUntil: new Date(Date.now() + 3600000).toISOString(),
+        checksumHash: 'dummy-checksum',
+        status: 'active',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
         createdAt: new Date().toISOString(),
       };
 
@@ -121,6 +124,7 @@ describe('Phase 23: Final Payment Security & Hackathon Release Gate', () => {
 
       const quote: Quote = {
         id: 'quote-test-p23-sync',
+        requestId: 'req-test-p23-sync',
         businessId: DEMO_BUSINESS.id,
         supplierId: DEMO_SUPPLIERS[0].id,
         supplierName: DEMO_SUPPLIERS[0].name,
@@ -131,8 +135,9 @@ describe('Phase 23: Final Payment Security & Hackathon Release Gate', () => {
         totalCents: 10000,
         currency: 'USD',
         version: 1,
-        checksum: 'dummy',
-        validUntil: new Date(Date.now() + 3600000).toISOString(),
+        checksumHash: 'dummy',
+        status: 'active',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
         createdAt: new Date().toISOString(),
       };
 
